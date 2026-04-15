@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=DeskVane
+Comment=Linux tray-based aggregation toolbox
+Exec=deskvane
+Icon=deskvane
+Terminal=false
+Categories=Utility;
+StartupNotify=false

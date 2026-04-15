@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "deskvane"
+version = "0.1.0"
+description = "DeskVane Linux tray-based aggregation toolbox"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "pystray>=0.19.5",
+  "Pillow>=10.0.0",
+  "pynput>=1.7.6",
+  "mss>=9.0.0",
+  "PyYAML>=6.0.1",
+  "keyboard>=0.13.5",
+  "python-xlib>=0.33",
+]
+
+[project.scripts]
+deskvane = "deskvane.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["deskvane*"]
+
+[tool.setuptools.package-data]
+deskvane = ["assets/*.png", "assets/*.svg"]
