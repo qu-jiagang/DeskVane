@@ -19,10 +19,9 @@ from typing import Any, Callable, TextIO
 import yaml
 
 from ..config import MihomoConfig
-from ..notifier import Notifier
+from ..features.shell.notifications import Notifier
 from .api import MihomoApiClient
 from .pac import (
-    extract_domains_from_pac_js,
     parse_domain_list,
     sync_pac_rules,
 )
@@ -1013,25 +1012,16 @@ class MihomoCoreManager:
         before the final ``MATCH`` catch-all so they participate in TUN-mode
         routing.
 
-        If ``pac_remote_url`` is set, domains are extracted from a previously
-        cached copy of the remote PAC file (saved to disk by the PAC server).
-        No network I/O is performed here — this method runs during config
-        generation which happens *before* Mihomo starts.
+        Remote PAC files are not projected into Mihomo rules. Their JavaScript
+        logic can encode DIRECT / PROXY branches and arbitrary conditions that
+        are not faithfully representable as a static Mihomo domain suffix list.
+        In remote PAC mode we therefore remove managed PAC rules entirely so
+        TUN traffic keeps following the explicit Mihomo rule set instead of a
+        misleading best-effort translation.
         """
         remote_url = getattr(cfg, "pac_remote_url", "") or ""
         if remote_url.strip() and cfg.pac_enabled:
-            # Try to read from disk cache only — no network requests.
             proxy_domains: list[str] = []
-            cache_dir = Path(cfg.core_home_dir) / "pac_cache"
-            import re as _re
-            safe_name = _re.sub(r"[^\w]", "_", remote_url.strip())[:120] + ".pac"
-            cache_file = cache_dir / safe_name
-            if cache_file.exists():
-                try:
-                    cached_pac = cache_file.read_text(encoding="utf-8")
-                    proxy_domains = extract_domains_from_pac_js(cached_pac)
-                except Exception:
-                    pass
             direct_domains: list[str] = []
         else:
             proxy_domains = parse_domain_list(cfg.pac_proxy_domains)

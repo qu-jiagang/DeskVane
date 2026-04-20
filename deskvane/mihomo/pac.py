@@ -213,7 +213,7 @@ _PROXY_VAR_RE = re.compile(
 # Standalone proxy strings inside return statements or assignments.
 # Matches e.g.:  SOCKS5 127.0.0.1:1080  /  PROXY 192.168.1.1:3128
 _PROXY_TOKEN_RE = re.compile(
-    r"(PROXY|SOCKS5?|HTTPS?)\s+[\d.]+:\d+",
+    r"(PROXY|SOCKS5?|HTTPS?)\s+(?:[\d.]+|[a-z0-9.-]+):\d+",
     re.IGNORECASE,
 )
 

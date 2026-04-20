@@ -1,3 +1,5 @@
 """DeskVane — Linux tray-based aggregation toolbox."""
 
-__version__ = "0.1.0"
+from .version import get_version
+
+__version__ = get_version()

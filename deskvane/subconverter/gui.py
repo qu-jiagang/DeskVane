@@ -5,7 +5,7 @@ from tkinter import filedialog
 from typing import TYPE_CHECKING
 
 from .service import convert_subscription_source_to_yaml
-from ..ui_theme import (
+from ..ui.ui_theme import (
     ACCENT,
     ACCENT_FG,
     BG,

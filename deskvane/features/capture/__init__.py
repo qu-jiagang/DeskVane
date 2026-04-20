@@ -1,0 +1,1 @@
+"""Capture feature package."""

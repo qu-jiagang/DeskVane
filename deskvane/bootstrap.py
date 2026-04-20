@@ -4,6 +4,9 @@ import os
 import sys
 from pathlib import Path
 
+from .platform.base import PlatformServices
+from .platform.factory import create_platform_services
+
 SYSTEM_DIST_PACKAGES = (
     Path("/usr/lib/python3/dist-packages"),
     Path("/usr/local/lib/python3/dist-packages"),
@@ -52,3 +55,9 @@ def _can_use_appindicator() -> bool:
         return False
 
     return False
+
+
+def bootstrap_platform_services() -> PlatformServices:
+    """Prepare process-level bootstrap concerns and return platform services."""
+    configure_linux_tray_backend()
+    return create_platform_services()

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-import subprocess
 import threading
 import tkinter as tk
 import urllib.parse
@@ -11,7 +10,7 @@ from typing import TYPE_CHECKING, Any, Callable
 import yaml
 
 from .api import DEFAULT_DELAY_TEST_URL, MihomoProxyGroup, MihomoRuntimeState
-from ..ui_theme import (
+from ..ui.ui_theme import (
     ACCENT as _ACCENT,
     ACCENT_FG as _ACCENT_FG,
     ACCENT_HOVER as _ACCENT_HOVER,
@@ -2279,16 +2278,12 @@ class _MihomoPanel:
 
     def _open_config(self) -> None:
         config_path = self.manager.get_core_status().config_path
-        try:
-            subprocess.Popen(["xdg-open", config_path])
-        except FileNotFoundError:
+        if not self.app.platform_services.opener.open_path(config_path):
             messagebox.showerror("打开失败", config_path, parent=self.win)
 
     def _open_logs(self) -> None:
         logs_dir = self.manager.get_core_status().logs_dir
-        try:
-            subprocess.Popen(["xdg-open", logs_dir])
-        except FileNotFoundError:
+        if not self.app.platform_services.opener.open_path(logs_dir):
             messagebox.showerror("打开失败", logs_dir, parent=self.win)
 
     def _open_controller(self) -> None:

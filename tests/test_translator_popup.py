@@ -1,6 +1,7 @@
 import tkinter as tk
 
 import pytest
+from unittest import mock
 
 from deskvane import ui_theme
 from deskvane.translator.popup import TranslationPopup
@@ -65,5 +66,19 @@ def test_translation_popup_long_cjk_text_uses_scrollbar() -> None:
         assert popup._body_scrollbar_visible
         assert display_lines is not None and display_lines[0] > 1
         assert popup.body_text.yview()[1] < 1.0
+    finally:
+        root.destroy()
+
+
+def test_translation_popup_prefers_callback_for_copy() -> None:
+    root = _make_root()
+    try:
+        on_copy = mock.Mock(return_value=True)
+        popup = TranslationPopup(root, on_copy=on_copy)
+        popup._current_text = "平台文本复制"
+
+        popup._copy_text()
+
+        on_copy.assert_called_once_with("平台文本复制")
     finally:
         root.destroy()

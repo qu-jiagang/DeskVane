@@ -1,0 +1,108 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux Full Test
+            os: ubuntu-latest
+            python-version: "3.11"
+            pytest-target: "pytest -q"
+            install-system-deps: true
+          - name: Windows Core Test
+            os: windows-latest
+            python-version: "3.11"
+            pytest-target: >-
+              pytest -q
+              tests/test_bootstrap.py
+              tests/test_config.py
+              tests/test_config_validation.py
+              tests/test_packaging_artifacts.py
+              tests/test_platform_cross_platform_services.py
+              tests/test_platform_factory.py
+              tests/test_platform_feature_gating.py
+              tests/test_platform_hotkeys.py
+              tests/test_platform_mvp_services.py
+              tests/test_platform_shell_smoke.py
+              tests/test_platform_tray.py
+              tests/test_screenshot_controller.py
+              tests/test_text_clipboard_platform.py
+              tests/test_tray_actions.py
+            install-system-deps: false
+          - name: macOS Core Test
+            os: macos-latest
+            python-version: "3.11"
+            pytest-target: >-
+              pytest -q
+              tests/test_bootstrap.py
+              tests/test_config.py
+              tests/test_config_validation.py
+              tests/test_packaging_artifacts.py
+              tests/test_platform_cross_platform_services.py
+              tests/test_platform_factory.py
+              tests/test_platform_feature_gating.py
+              tests/test_platform_hotkeys.py
+              tests/test_platform_mvp_services.py
+              tests/test_platform_shell_smoke.py
+              tests/test_platform_tray.py
+              tests/test_screenshot_controller.py
+              tests/test_text_clipboard_platform.py
+              tests/test_tray_actions.py
+            install-system-deps: false
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install Linux system dependencies
+        if: matrix.install-system-deps
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb
+
+      - name: Install Python dependencies
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e . pytest
+
+      - name: Smoke import
+        shell: bash
+        run: |
+          python - <<'PY'
+          import deskvane.bootstrap
+          import deskvane.app
+          import deskvane.screenshot_controller
+          import deskvane.tray_actions
+          import deskvane.platform.factory
+          print("smoke import ok")
+          PY
+
+      - name: Compile package
+        shell: bash
+        run: python -m compileall deskvane
+
+      - name: Run tests
+        shell: bash
+        run: |
+          if [[ "${{ matrix.os }}" == "ubuntu-latest" ]]; then
+            xvfb-run -a ${{ matrix.pytest-target }}
+          else
+            ${{ matrix.pytest-target }}
+          fi

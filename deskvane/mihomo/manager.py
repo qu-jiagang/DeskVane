@@ -10,7 +10,7 @@ import webbrowser
 from typing import Any, Callable
 
 from ..config import MihomoConfig
-from ..notifier import Notifier
+from ..features.shell.notifications import Notifier
 from .api import MihomoApiClient, MihomoRuntimeState
 from .core_manager import MihomoCoreManager, MihomoCoreStatus
 from .pac import fetch_remote_pac, generate_pac_script, parse_domain_list
@@ -340,12 +340,12 @@ class MihomoManager:
     def is_pac_running(self) -> bool:
         return self._pac_server is not None and self._pac_server.is_running()
 
-    def set_pac_enabled(self, enabled: bool) -> None:
+    def set_pac_enabled(self, enabled: bool) -> bool:
         """Start or stop the PAC server based on the desired state."""
         if enabled:
-            self._start_pac_if_needed()
-        else:
-            self._stop_pac()
+            return self._start_pac_if_needed()
+        self._stop_pac()
+        return True
 
     def restart_pac(self) -> bool:
         """Restart the PAC server with current config."""

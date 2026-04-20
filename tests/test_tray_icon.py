@@ -5,7 +5,7 @@ from PIL import Image as PILImage
 from PIL import ImageDraw as PILImageDraw
 
 from deskvane.mihomo.api import MihomoProxyGroup, MihomoRuntimeState
-from deskvane.tray import TrayController
+from deskvane.ui.tray import TrayController
 
 
 class _FakeTray:
@@ -31,6 +31,142 @@ class _Gpu:
         self.temp_c = temp_c
         self.mem_used_mb = mem_used_mb
         self.mem_total_mb = mem_total_mb
+
+
+def test_build_tray_menu_state_reads_git_proxy_flag_from_app() -> None:
+    tray = TrayController.__new__(TrayController)
+    tray.app = SimpleNamespace(
+        get_translator_state=lambda: SimpleNamespace(enabled=False, paused=False, last_translation_available=False),
+        get_shell_state=lambda: SimpleNamespace(
+            clipboard_history_enabled=True,
+            git_proxy_enabled=True,
+            terminal_proxy_enabled=False,
+            terminal_proxy_supported=False,
+        ),
+        platform_services=SimpleNamespace(
+            info=SimpleNamespace(
+                supports_terminal_proxy=False,
+                supports_mihomo_party=False,
+            )
+        ),
+    )
+    tray._clipboard_history_enabled = lambda: True
+    tray._build_mihomo_menu_state = lambda: SimpleNamespace()
+
+    state = TrayController._build_tray_menu_state(tray)
+
+    assert state.is_git_proxy_enabled is True
+
+
+def test_render_tray_menu_entry_wraps_checked_true_flag_as_callable() -> None:
+    captured = {}
+
+    class _FakePystray:
+        Menu = staticmethod(lambda *items: tuple(items))
+        MenuItem = staticmethod(lambda label, action, **kwargs: captured.update({"label": label, "action": action, **kwargs}) or captured)
+        class _Separator:
+            pass
+        Menu = SimpleNamespace(SEPARATOR=_Separator(), __call__=staticmethod(lambda *items: tuple(items)))
+
+    tray = TrayController.__new__(TrayController)
+    tray.pystray = _FakePystray
+    tray._resolve_menu_action = lambda action, args: ("resolved", action, args)
+
+    entry = SimpleNamespace(
+        label="Git 代理",
+        action="toggle_git_proxy",
+        action_args=(),
+        enabled=True,
+        checked=True,
+        radio=False,
+        default=False,
+        submenu=(),
+    )
+
+    rendered = TrayController._render_tray_menu_entry(tray, entry)
+
+    assert rendered["label"] == "Git 代理"
+    assert callable(rendered["checked"])
+    assert rendered["checked"](None) is True
+
+
+def test_render_tray_menu_entry_omits_checked_for_unchecked_item() -> None:
+    captured = {}
+
+    class _FakePystray:
+        class _Menu:
+            SEPARATOR = object()
+
+            def __call__(self, *items):
+                return tuple(items)
+
+        Menu = _Menu()
+        MenuItem = staticmethod(lambda label, action, **kwargs: captured.update({"label": label, "action": action, **kwargs}) or captured)
+
+    tray = TrayController.__new__(TrayController)
+    tray.pystray = _FakePystray
+    tray._resolve_menu_action = lambda action, args: ("resolved", action, args)
+
+    entry = SimpleNamespace(
+        label="帮助",
+        action="show_help",
+        action_args=(),
+        enabled=True,
+        checked=False,
+        radio=False,
+        default=False,
+        submenu=(),
+    )
+
+    rendered = TrayController._render_tray_menu_entry(tray, entry)
+
+    assert rendered["label"] == "帮助"
+    assert rendered["checked"] is None
+
+
+def test_render_tray_menu_entry_omits_checked_for_submenu_parent() -> None:
+    captured = {}
+
+    class _FakePystray:
+        class _Menu:
+            SEPARATOR = object()
+
+            def __call__(self, *items):
+                return tuple(items)
+
+        Menu = _Menu()
+        MenuItem = staticmethod(lambda label, action, **kwargs: captured.update({"label": label, "action": action, **kwargs}) or captured)
+
+    tray = TrayController.__new__(TrayController)
+    tray.pystray = _FakePystray
+    tray._resolve_menu_action = lambda action, args: ("resolved", action, args)
+
+    entry = SimpleNamespace(
+        label="代理",
+        action=None,
+        action_args=(),
+        enabled=True,
+        checked=True,
+        radio=False,
+        default=False,
+        submenu=(
+            SimpleNamespace(
+                label="Git 代理",
+                action="toggle_git_proxy",
+                action_args=(),
+                enabled=True,
+                checked=True,
+                radio=False,
+                default=False,
+                submenu=(),
+            ),
+        ),
+    )
+
+    rendered = TrayController._render_tray_menu_entry(tray, entry)
+
+    assert rendered["label"] == "代理"
+    assert rendered["checked"] is None
 
 
 def _png_bytes(image) -> bytes:
@@ -89,24 +225,14 @@ def test_mihomo_snapshot_uses_core_status_running_flag() -> None:
     )
     tray = TrayController.__new__(TrayController)
     tray.app = SimpleNamespace(
-        mihomo_manager=SimpleNamespace(
+        get_mihomo_state=lambda: SimpleNamespace(
+            installed=True,
+            running=True,
             backend="core",
-            display_name="Mihomo Core",
-            is_installed=lambda: True,
-            is_running=lambda: False,
-            get_core_status=lambda: SimpleNamespace(
-                controller="http://127.0.0.1:9090",
-                api_ready=True,
-                running=True,
-            ),
-            get_runtime_state=lambda: runtime,
-        ),
-        config=SimpleNamespace(
-            mihomo=SimpleNamespace(
-                external_ui="",
-                external_ui_name="",
-                external_ui_url="",
-            )
+            title="Mihomo Core",
+            core_status=SimpleNamespace(controller="http://127.0.0.1:9090", api_ready=True, running=True),
+            runtime=runtime,
+            has_external_ui=False,
         ),
     )
 

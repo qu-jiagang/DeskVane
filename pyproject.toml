@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "deskvane"
-version = "0.1.0"
-description = "DeskVane Linux tray-based aggregation toolbox"
+version = "0.1.2"
+description = "DeskVane cross-platform tray-based aggregation toolbox"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
@@ -16,6 +16,11 @@ dependencies = [
   "PyYAML>=6.0.1",
   "keyboard>=0.13.5",
   "python-xlib>=0.33",
+]
+
+[project.optional-dependencies]
+packaging = [
+  "pyinstaller>=6.10",
 ]
 
 [project.scripts]

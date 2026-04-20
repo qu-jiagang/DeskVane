@@ -44,3 +44,15 @@ def test_configure_linux_tray_backend_does_not_force_backend_when_unavailable() 
         bootstrap.configure_linux_tray_backend()
 
     assert "PYSTRAY_BACKEND" not in os.environ
+
+
+def test_bootstrap_platform_services_configures_linux_backend_and_returns_services() -> None:
+    sentinel = object()
+
+    with mock.patch.object(bootstrap, "configure_linux_tray_backend") as configure_mock, \
+         mock.patch.object(bootstrap, "create_platform_services", return_value=sentinel) as create_mock:
+        services = bootstrap.bootstrap_platform_services()
+
+    configure_mock.assert_called_once_with()
+    create_mock.assert_called_once_with()
+    assert services is sentinel

@@ -29,6 +29,7 @@ class ProxyConfig:
 
 @dataclass(slots=True)
 class TranslatorConfig:
+    enabled: bool = False
     ollama_host: str = "http://127.0.0.1:11434"
     model: str = ""
     source_language: str = "auto"

@@ -2,6 +2,7 @@ from types import SimpleNamespace
 from unittest import mock
 
 from deskvane.app import DeskVaneApp
+from deskvane.config import CONFIG_PATH
 
 
 def _app_stub(*, notifications: bool = True) -> DeskVaneApp:
@@ -17,6 +18,12 @@ def _app_stub(*, notifications: bool = True) -> DeskVaneApp:
     )
     app.notifier = SimpleNamespace(show=mock.Mock())
     app.tray = SimpleNamespace(refresh=mock.Mock(), rebuild_menu=mock.Mock())
+    app.platform_services = SimpleNamespace(
+        opener=SimpleNamespace(
+            open_path=mock.Mock(return_value=True),
+            open_uri=mock.Mock(return_value=True),
+        )
+    )
     app.mihomo_manager = SimpleNamespace(refresh_tun_bypass_connections=mock.Mock(return_value=0))
     return app
 
@@ -36,37 +43,6 @@ def test_mihomo_toggle_tun_reloads_live_core_config() -> None:
     assert app.config.mihomo.tun_enabled is True
     app.tray.refresh.assert_called_once()
     app.tray.rebuild_menu.assert_called_once()
-
-
-def test_run_refreshes_tray_after_mihomo_autostart() -> None:
-    app = DeskVaneApp.__new__(DeskVaneApp)
-    app.config = SimpleNamespace(
-        general=SimpleNamespace(notifications_enabled=False),
-        mihomo=SimpleNamespace(autostart=True),
-    )
-    app.tray = SimpleNamespace(
-        start=mock.Mock(),
-        refresh=mock.Mock(),
-        rebuild_menu=mock.Mock(),
-        supports_menu=True,
-    )
-    app.hotkeys = SimpleNamespace(start=mock.Mock())
-    app.translator = SimpleNamespace(start=mock.Mock())
-    app.subconverter_server = None
-    app.mihomo_manager = SimpleNamespace(start=mock.Mock(return_value=True))
-    app.root = SimpleNamespace(after=mock.Mock(), mainloop=mock.Mock())
-    app._refresh_proxy_display = mock.Mock()
-
-    with mock.patch("deskvane.app.TerminalProxyManager.setup_hooks"):
-        DeskVaneApp.run(app)
-
-    app.tray.start.assert_called_once()
-    app.mihomo_manager.start.assert_called_once()
-    app.tray.refresh.assert_called_once()
-    app.tray.rebuild_menu.assert_called_once()
-    app.root.after.assert_any_call(1200, app.tray.refresh)
-    app.root.after.assert_any_call(1200, app.tray.rebuild_menu)
-    app.root.mainloop.assert_called_once()
 
 
 def test_mihomo_set_tun_bypass_is_pending_when_core_not_running() -> None:
@@ -138,6 +114,46 @@ def test_mihomo_save_subscription_url_updates_saved_subscription_list() -> None:
         "https://new.example/sub",
         "https://old.example/sub",
     ]
+
+
+def test_open_config_uses_platform_opener() -> None:
+    app = _app_stub(notifications=False)
+
+    assert DeskVaneApp.open_config(app) is None
+
+    app.platform_services.opener.open_path.assert_called_once_with(CONFIG_PATH)
+
+
+def test_open_config_shows_error_when_opener_fails() -> None:
+    app = _app_stub(notifications=False)
+    app.platform_services.opener.open_path.return_value = False
+
+    DeskVaneApp.open_config(app)
+
+    app.notifier.show.assert_called_once_with("无法打开配置", str(CONFIG_PATH))
+
+
+def test_open_mihomo_core_config_uses_platform_opener() -> None:
+    app = _app_stub(notifications=False)
+    app.mihomo_manager.get_core_status = mock.Mock(
+        return_value=SimpleNamespace(config_exists=True, config_path="/tmp/config.yaml", home_dir="/tmp/home")
+    )
+
+    DeskVaneApp.open_mihomo_core_config(app)
+
+    app.platform_services.opener.open_path.assert_called_once_with("/tmp/config.yaml")
+
+
+def test_open_mihomo_logs_uses_platform_opener() -> None:
+    app = _app_stub(notifications=False)
+    app.mihomo_manager.get_core_status = mock.Mock(
+        return_value=SimpleNamespace(config_exists=False, config_path="/tmp/config.yaml", logs_dir="/tmp/logs", home_dir="/tmp/home")
+    )
+
+    with mock.patch("deskvane.app.os.path.isdir", return_value=True):
+        DeskVaneApp.open_mihomo_logs(app)
+
+    app.platform_services.opener.open_path.assert_called_once_with("/tmp/logs")
 
 
 def test_mihomo_switch_subscription_reuses_update_flow() -> None:

@@ -1,0 +1,12 @@
+Package: deskvane
+Version: __VERSION__
+Section: utils
+Priority: optional
+Architecture: __ARCH__
+Maintainer: DeskVane Maintainers <opensource@example.com>
+Depends: python3 (>= 3.10), python3-tk, libnotify-bin
+Recommends: python3-gi, gir1.2-ayatanaappindicator3-0.1, xclip | wl-clipboard, tesseract-ocr, tesseract-ocr-chi-sim
+Description: DeskVane Linux tray-based aggregation toolbox
+ DeskVane collects screenshots, OCR, clipboard history, proxy toggles,
+ subscription conversion, and Mihomo controls into a single system tray app.
+

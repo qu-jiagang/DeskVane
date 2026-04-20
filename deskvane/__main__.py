@@ -10,13 +10,14 @@ def main() -> int:
         cmd = sys.argv[1]
 
     try:
-        from .bootstrap import configure_linux_tray_backend
+        from .bootstrap import bootstrap_platform_services
 
-        configure_linux_tray_backend()
+        platform_services = bootstrap_platform_services()
 
-        from .app import DeskVaneApp
-        app = DeskVaneApp()
-        app.run()
+        from .app_kernel import AppKernel
+
+        kernel = AppKernel(platform_services=platform_services)
+        kernel.run()
     except KeyboardInterrupt:
         return 0
     except Exception as exc:

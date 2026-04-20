@@ -3,26 +3,40 @@ from __future__ import annotations
 import os
 import queue
 import re
-import subprocess
 import tkinter as tk
 from pathlib import Path
+from types import SimpleNamespace
+from typing import TYPE_CHECKING
 
 from .log import get_logger
 
 _logger = get_logger("app")
 
 from .config import CONFIG_PATH, AppConfig, _save_config, load_config
-from .git_proxy import GitProxyManager
-from .hotkeys import HotkeyManager
-from .notifier import Notifier
-from .screenshot import ScreenshotTool
+from .core import ConfigManager
+from .features.capture.state import CaptureState
+from .features.clipboard_history.state import ClipboardHistoryState
+from .features.mihomo.state import MihomoFeatureState
+from .features.proxy.git_proxy import GitProxyManager
+from .features.proxy.state import ProxyState
+from .features.shell.hotkeys import HotkeyManager
+from .features.shell.notifications import Notifier
+from .features.shell.state import ShellState
+from .features.subconverter.state import SubconverterState
+from .mihomo.api import MihomoRuntimeState
+from .mihomo.core_manager import MihomoCoreStatus
+from .platform.base import PlatformServices
+from .platform.factory import get_platform_services
+from .features.capture.tool import ScreenshotTool
 from .translator.engine import TranslatorEngine
-from .tray import TrayController
-from .terminal_proxy import TerminalProxyManager
-from .clipboard_history import ClipboardHistoryManager
+from .ui import TrayController
+from .features.clipboard_history.manager import ClipboardHistoryManager
 from .subconverter import SubconverterServer
 from .subconverter.service import load_subscription_proxies
 from .mihomo import MihomoManager
+
+if TYPE_CHECKING:
+    from .app_context import ModuleContext
 
 _APP_ICON_PATH = Path(__file__).resolve().parent / "assets" / "deskvane-icon.png"
 
@@ -68,6 +82,14 @@ def _apply_tk_icon(window: tk.Misc) -> tk.PhotoImage | None:
         return None
 
 
+def _normalize_platform_specific_config(config: AppConfig, platform_services: PlatformServices) -> bool:
+    changed = False
+    if not platform_services.info.supports_mihomo_party and config.mihomo.backend == "party":
+        config.mihomo.backend = "core"
+        changed = True
+    return changed
+
+
 class UiDispatcher:
     """Thread-safe dispatcher that funnels callbacks into the tkinter main loop."""
 
@@ -96,7 +118,12 @@ class UiDispatcher:
 class DeskVaneApp:
     """Main application coordinating all tools."""
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        platform_services: PlatformServices | None = None,
+        config_manager: ConfigManager | None = None,
+        context: ModuleContext | SimpleNamespace | None = None,
+    ) -> None:
         # Tkinter root (hidden)
         self.root = tk.Tk()
         self._app_icon_image = _apply_tk_icon(self.root)
@@ -104,8 +131,14 @@ class DeskVaneApp:
 
         # Core services
         self.dispatcher = UiDispatcher(self.root)
-        self.notifier = Notifier()
-        self.config = load_config()
+        self.platform_services = platform_services or get_platform_services()
+        self.config_manager = config_manager or ConfigManager()
+        self.context: ModuleContext | SimpleNamespace | None = context
+        self._runtime_started = False
+        self.config = self.config_manager.load()
+        if _normalize_platform_specific_config(self.config, self.platform_services):
+            self._save_current_config()
+        self.notifier = Notifier(self.platform_services.notification)
 
         # Modules
         self.screenshot_tool = ScreenshotTool(self)
@@ -124,39 +157,7 @@ class DeskVaneApp:
             self.git_proxy_status_display = "未知"
         self.terminal_proxy_status_display = "未知"
 
-        # Hotkeys
         self.hotkeys = HotkeyManager(self)
-        self.hotkeys.register(
-            self.config.screenshot.hotkey,
-            self.do_screenshot,
-        )
-        self.hotkeys.register(
-            self.config.screenshot.hotkey_pin,
-            self.do_screenshot_and_pin,
-        )
-        self.hotkeys.register(
-            self.config.screenshot.hotkey_interactive,
-            self.do_screenshot_interactive,
-        )
-        self.hotkeys.register(
-            self.config.screenshot.hotkey_pin_clipboard,
-            self.do_pin_clipboard,
-        )
-        
-        if getattr(self.config.general, "clipboard_history_enabled", True):
-            self.hotkeys.register(
-                getattr(self.config.general, "hotkey_clipboard_history", "<alt>+v"),
-                self.show_clipboard_history,
-            )
-            
-        self.hotkeys.register(
-            getattr(self.config.screenshot, "hotkey_pure_ocr", "<alt>+<f1>"),
-            self.do_pure_ocr,
-        )
-        self.hotkeys.register(
-            getattr(self.config.translator, "hotkey_toggle_pause", "<ctrl>+<alt>+t"),
-            self.translator_toggle_pause,
-        )
 
         # Tray
         self.tray = TrayController(self)
@@ -165,39 +166,34 @@ class DeskVaneApp:
     # Lifecycle
     # ---------------------------------------------------------------
 
-    def run(self) -> None:
-        self.tray.start()
-        self.hotkeys.start()
-        self.translator.start()
-        if self.subconverter_server:
-            self.subconverter_server.start()
-        if getattr(self.config.mihomo, "autostart", False):
-            self.mihomo_manager.start()
-            self.tray.refresh()
-            self.tray.rebuild_menu()
-            self.root.after(1200, self.tray.refresh)
-            self.root.after(1200, self.tray.rebuild_menu)
+    def _save_current_config(self) -> None:
+        config_manager = getattr(self, "config_manager", None)
+        if config_manager is None:
+            _save_config(self.config)
+            return
+        config_manager.save(self.config)
 
-        # Terminal Proxy Integration
-        TerminalProxyManager.setup_hooks()
-        self.terminal_proxy_status_display = "未知"
-        self._refresh_proxy_display()
+    def start_runtime(self) -> None:
+        if self._runtime_started:
+            return
+        if self.context is None:
+            raise RuntimeError("DeskVaneApp requires ModuleContext before starting runtime")
+        self._runtime_started = True
 
-        # Main TK Loop
-        if not self.tray.supports_menu:
-            self.notifier.show(
-                "托盘菜单受限",
-                "当前 pystray 后端不支持完整菜单。建议安装 python3-gi 和 Ayatana AppIndicator。",
-            )
+    def stop_runtime(self) -> None:
+        if not self._runtime_started:
+            return
+        self._runtime_started = False
+
+    def enter_mainloop(self) -> None:
         self.root.mainloop()
 
+    def run(self) -> None:
+        self.start_runtime()
+        self.enter_mainloop()
+
     def quit(self) -> None:
-        if self.subconverter_server:
-            self.subconverter_server.stop()
-        self.mihomo_manager.stop_all()
-        self.translator.stop()
-        self.hotkeys.stop()
-        self.tray.stop()
+        self.stop_runtime()
         self.root.after(50, self.root.quit)
 
     def show_subconverter(self) -> None:
@@ -206,11 +202,11 @@ class DeskVaneApp:
 
     def show_help(self) -> None:
         def _open():
-            import webbrowser
-            from .help_doc import generate_help_html
+            from .ui.help_doc import generate_help_html
             try:
                 path = generate_help_html(self.config)
-                webbrowser.open(path.as_uri())
+                if not self.platform_services.opener.open_path(path):
+                    self.notifier.show("打开帮助失败", str(path))
             except Exception as e:
                 self.notifier.show("打开帮助失败", str(e))
         self.dispatcher.call_soon(_open)
@@ -241,6 +237,101 @@ class DeskVaneApp:
     def show_clipboard_history(self) -> None:
         self.dispatcher.call_soon(self.clipboard_history.show_overlay)
 
+    def get_capture_state(self) -> CaptureState:
+        cfg = self.config.screenshot
+        return CaptureState(
+            save_dir=str(cfg.save_dir),
+            copy_to_clipboard=bool(cfg.copy_to_clipboard),
+            save_to_disk=bool(cfg.save_to_disk),
+            notifications_enabled=bool(cfg.notifications_enabled),
+        )
+
+    def get_clipboard_history_state(self) -> ClipboardHistoryState:
+        overlay = getattr(self.clipboard_history, "_overlay", None)
+        overlay_visible = bool(overlay and getattr(overlay, "top", None) and overlay.top.winfo_exists())
+        return ClipboardHistoryState(
+            enabled=bool(getattr(self.config.general, "clipboard_history_enabled", True)),
+            item_count=len(getattr(self.clipboard_history, "history", [])),
+            overlay_visible=overlay_visible,
+        )
+
+    def get_translator_state(self):
+        return self.translator.snapshot_state()
+
+    def get_shell_state(self) -> ShellState:
+        tray = getattr(self, "tray", None)
+        return ShellState(
+            tray_supports_menu=bool(getattr(tray, "supports_menu", True)),
+            notifications_enabled=bool(getattr(self.config.general, "notifications_enabled", True)),
+            clipboard_history_enabled=bool(getattr(self.config.general, "clipboard_history_enabled", True)),
+            git_proxy_enabled=self.is_git_proxy_enabled,
+            terminal_proxy_enabled=self.is_terminal_proxy_enabled,
+            terminal_proxy_supported=bool(self.platform_services.info.supports_terminal_proxy),
+        )
+
+    def get_proxy_state(self) -> ProxyState:
+        return ProxyState(
+            address=str(self.config.proxy.address),
+            git_proxy_enabled=self.is_git_proxy_enabled,
+            terminal_proxy_enabled=self.is_terminal_proxy_enabled,
+            terminal_proxy_supported=bool(self.platform_services.info.supports_terminal_proxy),
+            git_proxy_status_display=str(getattr(self, "git_proxy_status_display", "未知")),
+            terminal_proxy_status_display=str(getattr(self, "terminal_proxy_status_display", "未知")),
+        )
+
+    @staticmethod
+    def _empty_mihomo_runtime(controller: str) -> MihomoRuntimeState:
+        return MihomoRuntimeState(
+            api_ready=False,
+            controller=controller,
+            mode="",
+            mixed_port=None,
+            port=None,
+            socks_port=None,
+            tun_enabled=False,
+            groups=[],
+        )
+
+    def get_mihomo_state(self) -> MihomoFeatureState:
+        mihomo = self.mihomo_manager
+        core_status = mihomo.get_core_status()
+        runtime = self._empty_mihomo_runtime(core_status.controller)
+        if mihomo.backend == "core" and core_status.api_ready:
+            try:
+                runtime = mihomo.get_runtime_state()
+            except Exception:
+                runtime = self._empty_mihomo_runtime(core_status.controller)
+        running = core_status.running if mihomo.backend == "core" else mihomo.is_running()
+        return MihomoFeatureState(
+            installed=bool(mihomo.is_installed()),
+            running=bool(running),
+            backend=str(mihomo.backend),
+            title=str(mihomo.display_name),
+            party_supported=bool(self.platform_services.info.supports_mihomo_party),
+            has_external_ui=bool(
+                self.config.mihomo.external_ui.strip()
+                or self.config.mihomo.external_ui_name.strip()
+                or self.config.mihomo.external_ui_url.strip()
+            ),
+            pac_enabled=bool(getattr(self.config.mihomo, "pac_enabled", False)),
+            subscription_url=str(getattr(self.config.mihomo, "subscription_url", "")).strip(),
+            saved_subscriptions=tuple(
+                str(item).strip()
+                for item in getattr(self.config.mihomo, "saved_subscriptions", [])
+                if str(item).strip()
+            ),
+            runtime=runtime,
+            core_status=core_status,
+        )
+
+    def get_subconverter_state(self) -> SubconverterState:
+        server = getattr(self, "subconverter_server", None)
+        return SubconverterState(
+            enabled=bool(getattr(self.config.subconverter, "enable_server", True)),
+            port=int(getattr(self.config.subconverter, "port", 7777)),
+            running=bool(server and getattr(server, "server", None)),
+        )
+
     # ---------------------------------------------------------------
     # Git Proxy
     # ---------------------------------------------------------------
@@ -255,7 +346,7 @@ class DeskVaneApp:
     @property
     def is_terminal_proxy_enabled(self) -> bool:
         try:
-            return TerminalProxyManager.get_status().enabled
+            return self.platform_services.proxy_session.is_enabled()
         except Exception:
             return False
 
@@ -294,7 +385,7 @@ class DeskVaneApp:
 
     def enable_terminal_proxy(self) -> None:
         try:
-            TerminalProxyManager.enable(self.config.proxy.address)
+            self.platform_services.proxy_session.enable(self.config.proxy.address)
             self._refresh_proxy_display()
             if self.config.general.notifications_enabled:
                 self.notifier.show("终端代理已注入", "新开此后的终端窗口将默认走代理。并且任何终端均可输入 'proxy' 随时切换！")
@@ -303,7 +394,7 @@ class DeskVaneApp:
 
     def disable_terminal_proxy(self) -> None:
         try:
-            TerminalProxyManager.disable(self.config.proxy.address)
+            self.platform_services.proxy_session.disable(self.config.proxy.address)
             self._refresh_proxy_display()
             if self.config.general.notifications_enabled:
                 self.notifier.show("终端代理默认注入已关", "新终端不再默认代理。但依然随时可用 'proxy' 命令！")
@@ -317,8 +408,8 @@ class DeskVaneApp:
             self.git_proxy_status_display = "未知"
             
         try:
-            status = TerminalProxyManager.get_status()
-            self.terminal_proxy_status_display = "已开启 (新终端有效)" if status.enabled else "未开启"
+            enabled = self.platform_services.proxy_session.is_enabled()
+            self.terminal_proxy_status_display = "已开启 (新终端有效)" if enabled else "未开启"
         except Exception:
             self.terminal_proxy_status_display = "未知"
             
@@ -339,7 +430,7 @@ class DeskVaneApp:
         self.tray.refresh()
 
     def show_settings(self) -> None:
-        from .settings_panel import open_settings
+        from .ui.settings_panel import open_settings
         self.dispatcher.call_soon(lambda: open_settings(self))
 
     # ---------------------------------------------------------------
@@ -357,7 +448,7 @@ class DeskVaneApp:
         return ok
 
     def show_mihomo_window(self) -> None:
-        if self.mihomo_manager.backend == "core":
+        if self.mihomo_manager.backend == "core" or not self.platform_services.info.supports_mihomo_party:
             from .mihomo.panel import open_mihomo_panel
             open_mihomo_panel(self)
             return
@@ -369,17 +460,13 @@ class DeskVaneApp:
     def open_mihomo_core_config(self) -> None:
         status = self.mihomo_manager.get_core_status()
         target = status.config_path if status.config_exists else status.home_dir
-        try:
-            subprocess.Popen(["xdg-open", target])
-        except FileNotFoundError:
+        if not self.platform_services.opener.open_path(target):
             self.notifier.show("无法打开 Mihomo 配置", target)
 
     def open_mihomo_logs(self) -> None:
         status = self.mihomo_manager.get_core_status()
         target = status.logs_dir if os.path.isdir(status.logs_dir) else status.home_dir
-        try:
-            subprocess.Popen(["xdg-open", target])
-        except FileNotFoundError:
+        if not self.platform_services.opener.open_path(target):
             self.notifier.show("无法打开 Mihomo 日志目录", target)
 
     def mihomo_reload_core_config(self) -> bool:
@@ -419,7 +506,7 @@ class DeskVaneApp:
         ok = self.mihomo_manager.switch_tun(new_state)
         if ok:
             self.config.mihomo.tun_enabled = new_state
-            _save_config(self.config)
+            self._save_current_config()
             reloaded = self.mihomo_manager.reload_core_config()
             if not reloaded:
                 detail = self.mihomo_manager.get_core_status().last_error or "TUN 主开关已切换，但运行态配置重载失败。"
@@ -439,7 +526,7 @@ class DeskVaneApp:
         """Save the TUN bypass process list and reload config."""
         normalized = _normalize_process_list(processes)
         self.config.mihomo.tun_direct_processes = normalized
-        _save_config(self.config)
+        self._save_current_config()
         running = self.mihomo_manager.is_running()
         closed_connections = 0
         if running:
@@ -497,7 +584,7 @@ class DeskVaneApp:
             normalized,
             getattr(self.config.mihomo, "saved_subscriptions", []),
         )
-        _save_config(self.config)
+        self._save_current_config()
         if self.config.general.notifications_enabled:
             if normalized:
                 self.notifier.show("Mihomo 订阅地址已保存", normalized)
@@ -516,7 +603,7 @@ class DeskVaneApp:
             subscription_source,
             getattr(self.config.mihomo, "saved_subscriptions", []),
         )
-        _save_config(self.config)
+        self._save_current_config()
 
         try:
             proxies = load_subscription_proxies(subscription_source, timeout_s=10)
@@ -568,12 +655,19 @@ class DeskVaneApp:
 
     def mihomo_toggle_pac(self) -> bool:
         """Toggle PAC mode on/off."""
+        previous_state = bool(self.config.mihomo.pac_enabled)
         new_state = not self.config.mihomo.pac_enabled
         self.config.mihomo.pac_enabled = new_state
-        _save_config(self.config)
+        self._save_current_config()
 
         # Start or stop the PAC server
-        self.mihomo_manager.set_pac_enabled(new_state)
+        pac_ok = self.mihomo_manager.set_pac_enabled(new_state)
+        if not pac_ok:
+            self.config.mihomo.pac_enabled = previous_state
+            self._save_current_config()
+            self.tray.refresh()
+            self.tray.rebuild_menu()
+            return False
 
         # Sync PAC rules into Mihomo config for TUN mode
         running = self.mihomo_manager.is_running()
@@ -601,6 +695,11 @@ class DeskVaneApp:
         """Save PAC domain configuration and apply changes."""
         from deskvane.mihomo.pac import invalidate_remote_pac_cache
 
+        previous_remote_url = self.config.mihomo.pac_remote_url
+        previous_proxy_domains = self.config.mihomo.pac_proxy_domains
+        previous_direct_domains = self.config.mihomo.pac_direct_domains
+        previous_default_action = self.config.mihomo.pac_default_action
+        previous_pac_port = self.config.mihomo.pac_port
         self.config.mihomo.pac_remote_url = remote_url.strip()
         self.config.mihomo.pac_proxy_domains = proxy_domains.strip()
         self.config.mihomo.pac_direct_domains = direct_domains.strip()
@@ -610,7 +709,7 @@ class DeskVaneApp:
         self.config.mihomo.pac_default_action = normalized_action
         if pac_port is not None:
             self.config.mihomo.pac_port = max(1024, min(65535, pac_port))
-        _save_config(self.config)
+        self._save_current_config()
 
         # Clear remote PAC cache so next request fetches fresh content
         if remote_url.strip():
@@ -618,7 +717,22 @@ class DeskVaneApp:
 
         # Restart PAC server if running
         if self.config.mihomo.pac_enabled:
-            self.mihomo_manager.restart_pac()
+            pac_ok = self.mihomo_manager.restart_pac()
+            if not pac_ok:
+                self.config.mihomo.pac_remote_url = previous_remote_url
+                self.config.mihomo.pac_proxy_domains = previous_proxy_domains
+                self.config.mihomo.pac_direct_domains = previous_direct_domains
+                self.config.mihomo.pac_default_action = previous_default_action
+                self.config.mihomo.pac_port = previous_pac_port
+                self._save_current_config()
+                if remote_url.strip():
+                    invalidate_remote_pac_cache(remote_url.strip())
+                if previous_remote_url.strip():
+                    invalidate_remote_pac_cache(previous_remote_url.strip())
+                self.mihomo_manager.restart_pac()
+                self.tray.refresh()
+                self.tray.rebuild_menu()
+                return False
 
         # Sync PAC rules into Mihomo config for TUN mode
         running = self.mihomo_manager.is_running()
@@ -635,9 +749,10 @@ class DeskVaneApp:
         """Copy the PAC URL to clipboard."""
         pac_url = self.mihomo_manager.pac_url
         try:
-            self.root.clipboard_clear()
-            self.root.clipboard_append(pac_url)
-            self.root.update()
+            if not self.platform_services.clipboard.write_text(pac_url):
+                self.root.clipboard_clear()
+                self.root.clipboard_append(pac_url)
+                self.root.update()
             if self.config.general.notifications_enabled:
                 self.notifier.show("PAC 地址已复制", pac_url)
         except Exception as exc:
@@ -650,33 +765,19 @@ class DeskVaneApp:
 
     def reload_config(self) -> None:
         try:
-            self.config = load_config()
+            self.config = self.config_manager.load()
         except Exception as exc:
             self.notifier.show("配置加载失败", str(exc))
             return
+        if _normalize_platform_specific_config(self.config, self.platform_services):
+            self._save_current_config()
         self.mihomo_manager.reload_config()
         self.translator.reload()
         self._refresh_proxy_display()
 
-        # Re-register hotkeys with potentially new bindings
-        self.hotkeys.clear()
-        self.hotkeys.register(self.config.screenshot.hotkey, self.do_screenshot)
-        self.hotkeys.register(self.config.screenshot.hotkey_pin, self.do_screenshot_and_pin)
-        self.hotkeys.register(self.config.screenshot.hotkey_interactive, self.do_screenshot_interactive)
-        self.hotkeys.register(self.config.screenshot.hotkey_pin_clipboard, self.do_pin_clipboard)
-        self.hotkeys.register(
-            getattr(self.config.screenshot, "hotkey_pure_ocr", "<alt>+<f1>"),
-            self.do_pure_ocr,
-        )
-        self.hotkeys.register(
-            getattr(self.config.translator, "hotkey_toggle_pause", "<ctrl>+<alt>+t"),
-            self.translator_toggle_pause,
-        )
-        if getattr(self.config.general, "clipboard_history_enabled", True):
-            self.hotkeys.register(
-                getattr(self.config.general, "hotkey_clipboard_history", "<alt>+v"),
-                self.show_clipboard_history,
-            )
+        if self.context is None or self.context.hotkey_registry is None:
+            raise RuntimeError("DeskVaneApp requires hotkey registry context before reloading config")
+        self.context.hotkey_registry.bind(self)
         self.hotkeys.restart()
         self.tray.rebuild_menu()
 
@@ -684,7 +785,5 @@ class DeskVaneApp:
             self.notifier.show("配置已重载", "")
 
     def open_config(self) -> None:
-        try:
-            subprocess.Popen(["xdg-open", str(CONFIG_PATH)])
-        except FileNotFoundError:
+        if not self.platform_services.opener.open_path(CONFIG_PATH):
             self.notifier.show("无法打开配置", str(CONFIG_PATH))

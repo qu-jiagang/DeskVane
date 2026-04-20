@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from .clipboard import CLIPBOARD, PRIMARY, TkClipboardBackend, choose_clipboard_backend
+from ..features.translator.state import TranslatorState
 from .ollama import OllamaClient
 from .popup import TranslationPopup
 from .text_utils import ellipsize, is_translatable, normalize_text
@@ -91,7 +92,7 @@ class TranslatorEngine:
 
         self.clipboard_backend = choose_clipboard_backend(self.root)
         self.tk_clipboard = TkClipboardBackend(self.root)
-        self.popup = TranslationPopup(self.root)
+        self.popup = TranslationPopup(self.root, on_copy=self._write_clipboard)
 
         self.paused = True
         self.running = False
@@ -111,8 +112,24 @@ class TranslatorEngine:
         self.suppressed_values: dict[str, SuppressedValue] = {}
         self.last_error_signature = ""
         self.last_error_at = 0.0
+        self._platform_clipboard = self.app.platform_services.clipboard
 
         self.worker = TranslationWorker(
+            client=self._build_client(),
+            on_result=lambda result: self.app.dispatcher.call_soon(
+                self._handle_translation_result, result
+            ),
+            on_error=lambda request, exc: self.app.dispatcher.call_soon(
+                self._handle_translation_error, request, exc
+            ),
+        )
+
+    @property
+    def enabled(self) -> bool:
+        return bool(getattr(self.app.config.translator, "enabled", False))
+
+    def _make_worker(self) -> TranslationWorker:
+        return TranslationWorker(
             client=self._build_client(),
             on_result=lambda result: self.app.dispatcher.call_soon(
                 self._handle_translation_result, result
@@ -127,6 +144,16 @@ class TranslatorEngine:
     # ---------------------------------------------------------------
 
     def start(self) -> None:
+        if not self.enabled:
+            self.running = False
+            self.paused = True
+            self.popup.hide()
+            self._set_status("disabled", "未启用")
+            return
+        if self.worker.is_alive():
+            return
+        if getattr(self.worker, "_stopped", False):
+            self.worker = self._make_worker()
         self.running = True
         self.worker.start()
         self._set_status("ready", "就绪")
@@ -134,7 +161,8 @@ class TranslatorEngine:
 
     def stop(self) -> None:
         self.running = False
-        self.worker.stop()
+        if self.worker.is_alive():
+            self.worker.stop()
         self.popup.hide()
 
     # ---------------------------------------------------------------
@@ -169,7 +197,9 @@ class TranslatorEngine:
 
     def _poll_source(self, source: str, now: float) -> None:
         try:
-            raw_text = self.clipboard_backend.read_text(source)
+            raw_text = self._platform_clipboard.read_text(source)
+            if raw_text is None:
+                raw_text = self.clipboard_backend.read_text(source)
         except Exception:
             return
         if raw_text is None:
@@ -229,6 +259,10 @@ class TranslatorEngine:
 
     def submit_pure_ocr(self, img_b64: str) -> None:
         """Submit an image purely for OCR without translation."""
+        if not self.enabled:
+            self._notify_once("翻译功能未启用", "如需 OCR/翻译能力，请先在设置中启用翻译功能并配置 Ollama。")
+            self._set_status("disabled", "未启用")
+            return
         cfg = self.app.config
         now = time.monotonic()
         self.last_submitted_text = img_b64
@@ -338,6 +372,8 @@ class TranslatorEngine:
             text=normalized,
             expires_at=time.monotonic() + 2.0,
         )
+        if self._platform_clipboard.write_text(text):
+            return
         if self.clipboard_backend.write_clipboard(text):
             return
         self.tk_clipboard.write_clipboard(text)
@@ -347,13 +383,13 @@ class TranslatorEngine:
     # ---------------------------------------------------------------
 
     def copy_last_translation(self) -> None:
-        if not self.last_translation:
+        if not self.enabled or not self.last_translation:
             return
         self._write_clipboard(self.last_translation)
         self._notify_once("已复制译文", self.last_translation, cooldown_s=0.5)
 
     def retry_last_input(self) -> None:
-        if not self.last_input_text:
+        if not self.enabled or not self.last_input_text:
             return
         self.pending_by_source[self.last_input_source or CLIPBOARD] = (
             self.last_input_text,
@@ -361,6 +397,10 @@ class TranslatorEngine:
         )
 
     def toggle_pause(self) -> None:
+        if not self.enabled:
+            self._notify_once("翻译功能未启用", "如需启用，请打开设置 > 翻译，并开启翻译功能。")
+            self._set_status("disabled", "未启用")
+            return
         self.paused = not self.paused
         if self.paused:
             self.popup.hide()
@@ -372,5 +412,31 @@ class TranslatorEngine:
         """Reload translator settings from current config."""
         self.clipboard_backend = choose_clipboard_backend(self.root)
         self.backend_label = self.clipboard_backend.name
-        self.worker.replace_client(self._build_client())
+        if self.worker.is_alive():
+            self.worker.replace_client(self._build_client())
+        else:
+            self.worker = self._make_worker()
         self.current_model_label = self.app.config.translator.model or "自动"
+        if not self.enabled:
+            self.stop()
+            self.running = False
+            self.paused = True
+            self.pending_by_source.clear()
+            self.popup.hide()
+            self._set_status("disabled", "未启用")
+            return
+        if not self.running:
+            self.start()
+
+    def snapshot_state(self) -> TranslatorState:
+        return TranslatorState(
+            enabled=self.enabled,
+            paused=self.paused,
+            running=self.running,
+            status_key=self.status_key,
+            status_text=self.status_text,
+            model_label=self.current_model_label,
+            backend_label=self.backend_label,
+            last_translation_available=bool(self.last_translation),
+            last_translation_preview=self.last_translation_preview,
+        )

@@ -13,6 +13,7 @@ import yaml
 from deskvane.mihomo.api import MihomoApiClient, MihomoRuntimeState
 from deskvane.mihomo.core_manager import MihomoCoreManager
 from deskvane.mihomo.manager import MihomoManager
+from deskvane.mihomo.pac import rewrite_pac_proxy
 
 
 class _Notifier:
@@ -243,6 +244,43 @@ def test_core_manager_preserves_custom_config_when_writing_provider() -> None:
 
         provider_data = yaml.safe_load((Path(temp_dir) / "providers" / "deskvane-subscription.yaml").read_text(encoding="utf-8"))
         assert provider_data["proxies"][0]["name"] == "Node-A"
+
+
+def test_rewrite_pac_proxy_rewrites_hostname_based_proxy_targets() -> None:
+    pac_js = 'function FindProxyForURL(){ return "PROXY proxy.example.com:8080; SOCKS5 gateway.example.net:1080; DIRECT"; }'
+
+    rewritten = rewrite_pac_proxy(pac_js, 7890)
+
+    assert "proxy.example.com:8080" not in rewritten
+    assert "gateway.example.net:1080" not in rewritten
+    assert rewritten.count("PROXY 127.0.0.1:7890") == 2
+
+
+def test_core_manager_remote_pac_mode_removes_managed_pac_rules() -> None:
+    with tempfile.TemporaryDirectory() as temp_dir:
+        cfg = _cfg(temp_dir)
+        cfg.pac_enabled = True
+        cfg.pac_remote_url = "https://example.com/pac.js"
+        config_path = Path(temp_dir) / "config.yaml"
+        config_path.write_text(
+            yaml.dump(
+                {
+                    "rules": [
+                        "DOMAIN-SUFFIX,old-proxy.example,DESKVANE-PROXY # pac-proxy",
+                        "DOMAIN-SUFFIX,old-direct.example,DIRECT # pac-direct",
+                        "MATCH,DESKVANE-PROXY",
+                    ]
+                },
+                allow_unicode=True,
+                sort_keys=False,
+            ),
+            encoding="utf-8",
+        )
+
+        manager = MihomoCoreManager(_Notifier(), lambda: cfg)
+        data = yaml.safe_load(manager.ensure_runtime_config().read_text(encoding="utf-8"))
+
+        assert data["rules"] == ["MATCH,DESKVANE-PROXY"]
 
 
 def test_core_manager_removes_managed_dns_defaults_when_tun_disabled() -> None:

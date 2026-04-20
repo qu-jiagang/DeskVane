@@ -3,6 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 VENV_BIN="${SCRIPT_DIR}/.venv/bin/deskvane"
+LAUNCHER_BIN="${HOME}/.local/bin/deskvane"
 ICON_SRC_SVG="${SCRIPT_DIR}/deskvane/assets/deskvane-icon.svg"
 ICON_SRC_PNG="${SCRIPT_DIR}/deskvane/assets/deskvane-icon.png"
 APP_ID="deskvane"
@@ -31,9 +32,14 @@ for arg in "$@"; do
     esac
 done
 
-if [ ! -f "$VENV_BIN" ]; then
-    echo "Error: $VENV_BIN not found."
-    echo "Please install first:  pip install -e ."
+EXEC_BIN="$LAUNCHER_BIN"
+if [ ! -f "$EXEC_BIN" ]; then
+    EXEC_BIN="$VENV_BIN"
+fi
+
+if [ ! -f "$EXEC_BIN" ]; then
+    echo "Error: launcher not found."
+    echo "Please install first: ./scripts/install.sh"
     exit 1
 fi
 
@@ -74,7 +80,7 @@ cat > "${APPS_DIR}/${DESKTOP_FILE}" <<EOF
 Type=Application
 Name=DeskVane
 Comment=Linux tray-based aggregation toolbox
-Exec=${VENV_BIN}
+Exec=${EXEC_BIN}
 Icon=${APP_ID}
 Terminal=false
 Categories=Utility;

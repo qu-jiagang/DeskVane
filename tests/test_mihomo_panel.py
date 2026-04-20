@@ -1,11 +1,64 @@
-import ast
-import inspect
-import textwrap
+from __future__ import annotations
+
 from types import SimpleNamespace
 from unittest import mock
 
+from deskvane.mihomo.panel import _MihomoPanel
+
+
+def _panel_stub() -> _MihomoPanel:
+    panel = _MihomoPanel.__new__(_MihomoPanel)
+    panel.win = SimpleNamespace()
+    panel.manager = SimpleNamespace()
+    panel.app = SimpleNamespace(
+        platform_services=SimpleNamespace(
+            opener=SimpleNamespace(open_path=mock.Mock(return_value=True))
+        )
+    )
+    return panel
+
+
+def test_open_config_uses_platform_opener() -> None:
+    panel = _panel_stub()
+    panel.manager.get_core_status = mock.Mock(
+        return_value=SimpleNamespace(config_path="/tmp/mihomo/config.yaml")
+    )
+
+    _MihomoPanel._open_config(panel)
+
+    panel.app.platform_services.opener.open_path.assert_called_once_with("/tmp/mihomo/config.yaml")
+
+
+def test_open_config_shows_error_when_opener_fails() -> None:
+    panel = _panel_stub()
+    panel.app.platform_services.opener.open_path.return_value = False
+    panel.manager.get_core_status = mock.Mock(
+        return_value=SimpleNamespace(config_path="/tmp/mihomo/config.yaml")
+    )
+
+    with mock.patch("deskvane.mihomo.panel.messagebox.showerror") as showerror:
+        _MihomoPanel._open_config(panel)
+
+    showerror.assert_called_once_with("打开失败", "/tmp/mihomo/config.yaml", parent=panel.win)
+
+
+def test_open_logs_uses_platform_opener() -> None:
+    panel = _panel_stub()
+    panel.manager.get_core_status = mock.Mock(
+        return_value=SimpleNamespace(logs_dir="/tmp/mihomo/logs")
+    )
+
+    _MihomoPanel._open_logs(panel)
+
+    panel.app.platform_services.opener.open_path.assert_called_once_with("/tmp/mihomo/logs")
+
+
+import ast
+import inspect
+import textwrap
+
 from deskvane.mihomo.api import DEFAULT_DELAY_TEST_URL, MihomoProxyGroup, MihomoRuntimeState
-from deskvane.mihomo.panel import _MihomoPanel, open_mihomo_panel
+from deskvane.mihomo.panel import open_mihomo_panel
 
 
 class _FakeVar:

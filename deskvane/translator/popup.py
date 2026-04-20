@@ -4,7 +4,7 @@ import math
 import tkinter as tk
 import unicodedata
 
-from ..ui_theme import ACCENT, BORDER, CARD, CARD_ALT, SUBTEXT, TEXT, button as themed_button, make_font
+from ..ui.ui_theme import ACCENT, BORDER, CARD, CARD_ALT, SUBTEXT, TEXT, button as themed_button, make_font
 
 
 def clamp_popup_position(
@@ -79,8 +79,9 @@ def clamp_window_position(
 
 
 class TranslationPopup:
-    def __init__(self, root: tk.Tk) -> None:
+    def __init__(self, root: tk.Tk, on_copy: callable | None = None) -> None:
         self.root = root
+        self._on_copy = on_copy
         self.edge_margin = 10
         self.min_width = 180
         self.min_height = 136
@@ -305,9 +306,14 @@ class TranslationPopup:
         if not self._current_text:
             return
         try:
-            self.root.clipboard_clear()
-            self.root.clipboard_append(self._current_text)
-            self.root.update_idletasks()
+            if self._on_copy is not None:
+                copied = self._on_copy(self._current_text)
+                if copied is False:
+                    raise tk.TclError("clipboard write failed")
+            else:
+                self.root.clipboard_clear()
+                self.root.clipboard_append(self._current_text)
+                self.root.update_idletasks()
         except tk.TclError:
             return
         self._copy_btn.configure(text="已复制")
