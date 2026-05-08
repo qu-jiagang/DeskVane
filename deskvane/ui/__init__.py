@@ -3,7 +3,7 @@
 from .help_doc import generate_help_html
 from .overlay import SelectionOverlay
 from .pin import PinnedImage
-from .settings_panel import mihomo_backend_options, open_settings
+from .settings_panel import open_settings
 from .tray import TrayController
 
 __all__ = [
@@ -12,5 +12,4 @@ __all__ = [
     "PinnedImage",
     "generate_help_html",
     "open_settings",
-    "mihomo_backend_options",
 ]

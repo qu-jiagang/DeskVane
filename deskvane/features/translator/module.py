@@ -14,7 +14,13 @@ class TranslatorFeatureModule(FeatureModule):
 
     def register(self, context: ModuleContext) -> None:
         self._context = context
-        context.tasks.register("translator", context.app.translator.start, context.app.translator.stop)
+        context.tasks.register(
+            "translator",
+            context.app.translator.start,
+            context.app.translator.stop,
+            context.app.translator.pause,
+            context.app.translator.resume,
+        )
 
     def start(self) -> None:
         return

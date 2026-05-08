@@ -5,11 +5,10 @@ from types import SimpleNamespace
 
 from .app import DeskVaneApp
 from .app_context import ModuleContext
-from .core import ConfigManager, TaskManager
+from .core import ConfigManager, RuntimeApi, RuntimeEventStore, RuntimeHttpServer, TaskManager
 from .feature_module import FeatureModule
 from .features.capture.module import CaptureFeatureModule
 from .features.clipboard_history.module import ClipboardHistoryFeatureModule
-from .features.mihomo.module import MihomoFeatureModule
 from .features.proxy.module import ProxyFeatureModule
 from .features.shell.module import HotkeyFeatureModule, TrayFeatureModule
 from .features.shell.registries import HotkeyRegistry, SettingsRegistry, TrayRegistry
@@ -57,6 +56,10 @@ class AppKernel:
             tray_registry=self.tray_registry,
         )
         self.app.context = self.context
+        self.runtime_events = RuntimeEventStore()
+        self.runtime_api = RuntimeApi(self.app, events=self.runtime_events)
+        self.runtime_server = RuntimeHttpServer(self.runtime_api)
+        self.task_manager.register("runtime-api", self.runtime_server.start, self.runtime_server.stop)
         self.modules = list(
             modules
             or [
@@ -67,7 +70,6 @@ class AppKernel:
                 TranslatorFeatureModule(),
                 SubconverterFeatureModule(),
                 ProxyFeatureModule(),
-                MihomoFeatureModule(),
             ]
         )
         for module in self.modules:
@@ -75,6 +77,7 @@ class AppKernel:
             self.hotkey_registry.extend(getattr(module, "contribute_hotkeys", lambda: ())())
             self.settings_registry.extend(getattr(module, "contribute_settings", lambda: ())())
             self.tray_registry.extend(getattr(module, "contribute_tray", lambda: ())())
+        self.app.tray.rebuild_menu()
         self.hotkey_registry.bind(self.app)
 
     def run(self) -> None:

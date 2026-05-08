@@ -1,5 +1,7 @@
 # DeskVane 架构设计草案
 
+> 注：Mihomo 集成已从 DeskVane 中彻底移除。本文档中提及的 `mihomo` / Mihomo Party / Mihomo Core / PAC 相关内容仅作为历史设计保留，不代表当前实现。
+
 ## 目标
 
 这份文档不是“当前代码说明书”，而是 DeskVane 接下来 1 到 3 个大版本应该收敛到的目标架构。

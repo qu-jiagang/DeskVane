@@ -1,4 +1,3 @@
-import yaml
 import tkinter as tk
 import tkinter.messagebox as messagebox
 from tkinter import filedialog
@@ -108,13 +107,6 @@ class SubconverterDialog:
             variant="primary",
             compact=True,
             font=make_font(10, weight="bold"),
-        ).pack(side=tk.LEFT, padx=(0, 10))
-        themed_button(
-            actions,
-            text="写入 Core",
-            command=self._apply_to_core,
-            variant="secondary",
-            compact=True,
         ).pack(side=tk.LEFT, padx=(0, 10))
         self._toggle_output_btn = themed_button(
             actions,
@@ -248,36 +240,3 @@ class SubconverterDialog:
             except Exception as e:
                 messagebox.showerror("保存失败", str(e), parent=self.top)
 
-    def _apply_to_core(self) -> None:
-        content = self.text_out.get("1.0", tk.END).strip()
-        if not content:
-            messagebox.showwarning("提示", "没有可应用的配置内容！", parent=self.top)
-            return
-
-        try:
-            payload = yaml.safe_load(content) or {}
-            if not isinstance(payload, dict):
-                raise ValueError("转换结果不是合法的 YAML 映射。")
-            proxies = payload.get("proxies")
-            if not isinstance(proxies, list) or not proxies:
-                raise ValueError("转换结果里没有可应用的代理节点。")
-
-            source_hint = self.text_in.get("1.0", tk.END).strip()
-            if "\n" in source_hint:
-                source_hint = "manual://subconverter"
-            provider_path = self.app.mihomo_manager.save_subscription_provider(proxies, source_hint)
-            reloaded = self.app.mihomo_manager.reload_core_config()
-
-            if reloaded:
-                body = (
-                    f"Provider 已写入:\n{provider_path}\n\n"
-                    "Core 正在运行，已重载。"
-                )
-            else:
-                body = (
-                    f"Provider 已写入:\n{provider_path}\n\n"
-                    "Core 未运行，稍后可手动重载。"
-                )
-            messagebox.showinfo("保存成功", body, parent=self.top)
-        except Exception as e:
-            messagebox.showerror("保存失败", str(e), parent=self.top)

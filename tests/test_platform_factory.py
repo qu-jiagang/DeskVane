@@ -22,7 +22,6 @@ def test_create_platform_services_returns_linux_services_on_linux() -> None:
     assert services.info.is_linux is True
     assert services.info.supports_tray_menu is True
     assert services.info.supports_terminal_proxy is True
-    assert services.info.supports_mihomo_party is True
     assert services.info.supports_hotkey_grab is True
     assert services.autostart.is_supported() is True
     assert services.autostart.is_enabled() is False
@@ -40,7 +39,6 @@ def test_create_platform_services_returns_windows_services_on_win32() -> None:
     assert services.info.is_windows is True
     assert services.info.supports_tray_menu is True
     assert services.info.supports_terminal_proxy is False
-    assert services.info.supports_mihomo_party is False
     assert services.info.supports_hotkey_grab is True
     assert services.autostart.is_supported() is True
     assert services.autostart.is_enabled() is False
@@ -65,7 +63,6 @@ def test_create_platform_services_returns_macos_services_on_darwin() -> None:
     assert services.info.is_macos is True
     assert services.info.supports_tray_menu is True
     assert services.info.supports_terminal_proxy is False
-    assert services.info.supports_mihomo_party is False
     assert services.info.supports_hotkey_grab is True
     assert services.autostart.is_supported() is True
     assert services.autostart.is_enabled() is False

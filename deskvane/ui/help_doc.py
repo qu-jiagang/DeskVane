@@ -153,13 +153,11 @@ def generate_help_html(cfg: AppConfig) -> pathlib.Path:
             </div>
 
             <div class="card">
-                <h2>订阅转换和 Mihomo</h2>
-                <p>本地订阅转换和 Mihomo Core 的控制入口都在应用内。</p>
+                <h2>订阅转换</h2>
+                <p>本地订阅转换工具，把机场订阅转成 YAML 配置，再导入你常用的 Clash/Mihomo 客户端。</p>
                 <ul>
                     <li><strong>订阅转换</strong>：在转换窗口输入订阅地址或原始链接。</li>
-                    <li><strong>应用到 Core</strong>：结果会写入 <code>{esc(getattr(cfg.mihomo, "core_home_dir", "~/.config/deskvane/mihomo"))}/providers/deskvane-subscription.yaml</code>。</li>
-                    <li><strong>Mihomo 面板</strong>：用于查看状态、切换模式和代理组。</li>
-                    <li><strong>本地 Web UI</strong>：如果配置了 <code>external_ui</code>，浏览器入口会打开对应界面。</li>
+                    <li><strong>导出</strong>：转换结果可直接复制或保存为 YAML 文件。</li>
                 </ul>
             </div>
 
@@ -168,7 +166,6 @@ def generate_help_html(cfg: AppConfig) -> pathlib.Path:
                 <ul>
                     <li>配置文件：<code>{esc(CONFIG_DIR)}/config.yaml</code></li>
                     <li>帮助页面：<code>{esc(CONFIG_DIR)}/help.html</code></li>
-                    <li>Mihomo 工作目录：<code>{esc(getattr(cfg.mihomo, "core_home_dir", "~/.config/deskvane/mihomo"))}</code></li>
                 </ul>
             </div>
 

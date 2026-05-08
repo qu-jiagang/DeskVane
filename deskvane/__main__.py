@@ -6,8 +6,11 @@ import sys
 
 
 def main() -> int:
-    if len(sys.argv) > 1:
-        cmd = sys.argv[1]
+    cmd = sys.argv[1] if len(sys.argv) > 1 else None
+    if cmd in {"runtime-api", "sidecar", "--runtime-api"}:
+        from .runtime_sidecar import main as sidecar_main
+
+        return sidecar_main(sys.argv[2:])
 
     try:
         from .bootstrap import bootstrap_platform_services

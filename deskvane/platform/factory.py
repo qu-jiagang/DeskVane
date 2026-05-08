@@ -68,7 +68,6 @@ def _platform_info() -> PlatformInfo:
             is_linux=True,
             supports_tray_menu=True,
             supports_terminal_proxy=True,
-            supports_mihomo_party=True,
             supports_hotkey_grab=True,
         )
     if sys.platform == "win32":

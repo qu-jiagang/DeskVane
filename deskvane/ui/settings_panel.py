@@ -87,33 +87,11 @@ _FIELD_LABELS: dict[str, str] = {
     # Subconverter
     "port":                 "订阅转换端口",
     "enable_server":        "启用订阅转换服务",
-    # Mihomo
-    "backend":              "运行后端",
-    "autostart":            "自动启动当前后端",
-    "core_binary":          "Core 二进制",
-    "core_home_dir":        "Core 工作目录",
-    "subscription_url":     "默认订阅地址",
-    "external_controller":  "Core 控制地址",
-    "secret":               "Core API 密钥",
-    "external_ui":          "External UI 目录",
-    "external_ui_name":     "External UI 名称",
-    "external_ui_url":      "External UI 下载地址",
-    "startup_timeout_s":    "Core 启动等待 (秒)",
-    "tun_enabled":          "启用 TUN 模式",
-    "tun_direct_processes": "TUN 直连程序",
 }
 
 _FIELD_HINTS: dict[str, str] = {
     "translator.enabled": "关闭时不会启动 Ollama 翻译监听，也不会触发 OCR 请求。",
     "proxy.address": "示例: http://127.0.0.1:7890",
-    "mihomo.backend": "Mihomo Party 仅 Linux 支持；非 Linux 平台会自动使用 Core。",
-    "mihomo.core_binary": "可填 PATH 中的 mihomo，也可填绝对路径。",
-    "mihomo.core_home_dir": "这里会存放 config.yaml、受管 provider 和日志文件。",
-    "mihomo.external_controller": "示例: 127.0.0.1:9090",
-    "mihomo.subscription_url": "也可在 Mihomo 面板里单独更新。",
-    "mihomo.tun_enabled": "透明代理，接管全部流量。需要 mihomo 拥有 NET_ADMIN 权限。",
-    "mihomo.tun_direct_processes": "逗号分隔的进程名，如 firefox,steam。这些程序不走代理。",
-    "mihomo.external_ui": "填写本地 Web UI 目录后，浏览器入口会打开 /ui。",
     "translator.model": "留空时按当前 Ollama 环境自动选择。",
     "translator.prompt_extra": "仅在需要扩展翻译提示词时填写。",
 }
@@ -129,17 +107,10 @@ _FIELD_OPTIONS: dict[str, list[tuple[str, str]]] = {
         ("gpu_temp",  "GPU 温度"),
         ("gpu_mem",   "GPU 显存占用"),
     ],
-    "mihomo.backend": [
-        ("core", "Mihomo Core"),
-    ],
 }
 
+_SOURCE_BUILD_STAMP = "源码戳: menu-fix-20260507-1538"
 
-def mihomo_backend_options(supports_party: bool) -> list[tuple[str, str]]:
-    options = [("core", "Mihomo Core")]
-    if supports_party:
-        options.insert(0, ("party", "Mihomo Party"))
-    return options
 
 def _settings_layout(app: DeskVaneApp):
     context = getattr(app, "context", None)
@@ -323,6 +294,14 @@ class _SettingsWindow:
             variant="ghost", compact=True, font=self._font_label,
         )
         yaml_btn.pack(side="left", padx=16, pady=12)
+        tk.Label(
+            footer,
+            text=_SOURCE_BUILD_STAMP,
+            bg=SIDEBAR,
+            fg=MUTED,
+            font=self._font_summary,
+            anchor="w",
+        ).pack(side="left", padx=(0, 16), pady=12)
 
     # ── Body (scrollable content) ────────────────────────────────────
 
@@ -590,8 +569,6 @@ class _SettingsWindow:
                 ).grid(row=1, column=1, sticky="w", pady=(6, 0))
 
     def _field_options(self, full_key: str) -> list[tuple[str, str]] | None:
-        if full_key == "mihomo.backend":
-            return mihomo_backend_options(self._platform_info.supports_mihomo_party)
         return _FIELD_OPTIONS.get(full_key)
 
     # ── Actions ──────────────────────────────────────────────────────
@@ -600,7 +577,6 @@ class _SettingsWindow:
         """Apply ALL field variable values back to draft config, save and reload."""
         pending_updates: list[tuple[object, str, object]] = []
         invalid_fields: list[str] = []
-        mihomo_tun_runtime_changed = False
         for full_key, var in self._field_vars.items():
             section_attr, field_name = full_key.split(".", 1)
             sub = getattr(self.draft, section_attr)
@@ -614,8 +590,6 @@ class _SettingsWindow:
                 else:
                     new_val = str(var.get())
                 pending_updates.append((sub, field_name, new_val))
-                if section_attr == "mihomo" and field_name in {"tun_enabled", "tun_direct_processes"} and new_val != old_val:
-                    mihomo_tun_runtime_changed = True
             except (ValueError, tk.TclError):
                 invalid_fields.append(label_text)
 
@@ -637,15 +611,6 @@ class _SettingsWindow:
         try:
             _save_config(self.app.config)
             self.app.reload_config()
-            if (
-                mihomo_tun_runtime_changed
-                and getattr(self.app.config.mihomo, "backend", "") == "core"
-                and self.app.mihomo_manager.is_running()
-            ):
-                ok = self.app.mihomo_manager.reload_core_config()
-                if not ok:
-                    detail = self.app.mihomo_manager.get_core_status().last_error or "运行态重载失败。"
-                    messagebox.showwarning("Mihomo 运行态未刷新", detail, parent=self.win)
         except Exception as exc:
             messagebox.showerror("保存失败", str(exc), parent=self.win)
             return

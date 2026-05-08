@@ -21,17 +21,9 @@ def test_feature_state_getters_expose_capture_clipboard_proxy_subconverter() -> 
         ),
         proxy=SimpleNamespace(address="http://127.0.0.1:7890"),
         subconverter=SimpleNamespace(enable_server=True, port=7777),
-        mihomo=SimpleNamespace(
-            external_ui="",
-            external_ui_name="",
-            external_ui_url="",
-            pac_enabled=False,
-            subscription_url="",
-            saved_subscriptions=[],
-        ),
     )
     app.clipboard_history = SimpleNamespace(history=["a", "b"], _overlay=None)
-    app.platform_services = SimpleNamespace(info=SimpleNamespace(supports_terminal_proxy=True, supports_mihomo_party=False))
+    app.platform_services = SimpleNamespace(info=SimpleNamespace(supports_terminal_proxy=True))
     app.platform_services.proxy_session = SimpleNamespace(is_enabled=lambda: False)
     app.tray = SimpleNamespace(supports_menu=True)
     app.git_proxy_status_display = "已开启"

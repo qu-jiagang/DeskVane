@@ -127,7 +127,6 @@ class PlatformInfo:
     is_macos: bool = False
     supports_tray_menu: bool = False
     supports_terminal_proxy: bool = False
-    supports_mihomo_party: bool = False
     supports_hotkey_grab: bool = False
 
 

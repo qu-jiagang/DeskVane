@@ -1,24 +1,17 @@
 from __future__ import annotations
 
 from io import BytesIO
-import os
 import threading
 import time
 from typing import TYPE_CHECKING
-from urllib.parse import parse_qs, urlparse
 
 from ..log import get_logger
-from ..mihomo.api import DEFAULT_DELAY_TEST_URL, MihomoRuntimeState
 from .tray_actions import (
-    MihomoMenuState,
-    MihomoProxyGroupState,
     TrayAction,
-    TrayMenuItem,
-    TrayMenuModel,
-    TrayMenuSeparator,
     TrayMenuState,
     build_tray_menu_model,
 )
+from .tray_model import TrayMenuSeparator
 
 if TYPE_CHECKING:
     from ..app import DeskVaneApp
@@ -64,8 +57,6 @@ class TrayController:
         self._last_label_payload: tuple[str, str] | None = None
         self._pending_label_payload: tuple[str, str] | None = None
         self._appindicator_label_setter = self._platform.build_label_setter()
-        self._mihomo_manual_delay_results: dict[str, int] = {}
-        self._mihomo_delay_test_running = False
         cpu, gpu = self._get_status_snapshot()
         initial_icon = self._build_icon(cpu=cpu, gpu=gpu)
         self._last_icon_payload = self._icon_to_png_bytes(initial_icon)
@@ -240,322 +231,6 @@ class TrayController:
 
         return "--", "100%"
 
-    def _get_mihomo_snapshot(self, use_cache: bool = True) -> dict:
-        now = time.monotonic()
-        cached = getattr(self, "_mihomo_snapshot_cache", None)
-        cache_at = getattr(self, "_mihomo_snapshot_at", 0.0)
-        if use_cache and cached is not None and (now - cache_at) < 0.4:
-            return cached
-
-        feature_state = self.app.get_mihomo_state()
-
-        snapshot = {
-            "installed": feature_state.installed,
-            "running": feature_state.running,
-            "backend": feature_state.backend,
-            "title": feature_state.title,
-            "core_status": feature_state.core_status,
-            "runtime": feature_state.runtime,
-            "has_external_ui": feature_state.has_external_ui,
-        }
-        self._mihomo_snapshot_cache = snapshot
-        self._mihomo_snapshot_at = now
-        return snapshot
-
-    @staticmethod
-    def _format_mihomo_mode(mode: str) -> str:
-        mapping = {
-            "rule": "Rule",
-            "global": "Global",
-            "direct": "Direct",
-        }
-        return mapping.get(mode, mode or "-")
-
-    @staticmethod
-    def _truncate_text(text: str, limit: int = 72) -> str:
-        text = " ".join(text.split())
-        if len(text) <= limit:
-            return text
-        return f"{text[:limit - 1]}…"
-
-    def _build_mihomo_root_label(self) -> str:
-        snapshot = self._get_mihomo_snapshot()
-        title = snapshot["title"]
-        if not snapshot["installed"]:
-            return f"{title} · 未安装"
-        if snapshot["backend"] == "party":
-            return f"{title} · {'运行中' if snapshot['running'] else '已停止'}"
-        if not snapshot["running"]:
-            return f"{title} · 已停止"
-        if not snapshot["core_status"].api_ready:
-            return f"{title} · 启动中"
-        runtime = snapshot["runtime"]
-        tun_tag = " · TUN" if runtime.tun_enabled else ""
-        pac_tag = " · PAC" if getattr(self.app.config.mihomo, "pac_enabled", False) else ""
-        return f"{title} · {self._format_mihomo_mode(runtime.mode)}{tun_tag}{pac_tag}"
-
-    def _build_mihomo_status_line(self) -> str:
-        snapshot = self._get_mihomo_snapshot()
-        title = snapshot["title"]
-        if not snapshot["installed"]:
-            return f"状态: {title} 未安装"
-        if snapshot["backend"] == "party":
-            return f"状态: {'运行中' if snapshot['running'] else '已停止'}"
-
-        status = snapshot["core_status"]
-        runtime = snapshot["runtime"]
-        if status.api_ready:
-            port = runtime.mixed_port or runtime.port or "-"
-            return f"端口: {port} | {len(runtime.groups)} 个代理组"
-        if snapshot["running"]:
-            return "等待 API 就绪…"
-        return "已停止"
-
-    def _build_mihomo_error_line(self) -> str:
-        snapshot = self._get_mihomo_snapshot()
-        status = snapshot["core_status"]
-        errors = [msg for msg in (status.last_error, status.config_error) if msg]
-        if not errors:
-            return ""
-        return f"错误: {self._truncate_text(' | '.join(errors), 32)}"
-
-    def _mihomo_api_ready(self) -> bool:
-        return bool(self._get_mihomo_snapshot()["core_status"].api_ready)
-
-    def _mihomo_current_mode(self) -> str:
-        return str(self._get_mihomo_snapshot()["runtime"].mode)
-
-    def _mihomo_tun_enabled(self) -> bool:
-        return bool(self._get_mihomo_snapshot()["runtime"].tun_enabled)
-
-    def _build_mihomo_open_label(self) -> str:
-        snapshot = self._get_mihomo_snapshot()
-        if snapshot["backend"] != "core":
-            return "打开控制台"
-        return "打开 Web UI" if snapshot["has_external_ui"] else "打开 API 地址"
-
-    def _mihomo_has_saved_subscription(self) -> bool:
-        return bool(self._saved_subscription_urls())
-
-    @staticmethod
-    def _mihomo_group_map(runtime: MihomoRuntimeState) -> dict[str, object]:
-        return {group.name: group for group in runtime.groups}
-
-    @staticmethod
-    def _mihomo_active_group_name(runtime: MihomoRuntimeState) -> str:
-        available = {group.name for group in runtime.groups}
-        mode = str(runtime.mode).strip().lower()
-        if mode == "global":
-            return "GLOBAL" if "GLOBAL" in available else ""
-        if mode == "rule":
-            if "PROXY" in available:
-                return "PROXY"
-            if "DESKVANE-PROXY" in available:
-                return "DESKVANE-PROXY"
-            return ""
-        if mode == "direct":
-            return "Direct" if "Direct" in available else ""
-        return ""
-
-    @staticmethod
-    def _mihomo_primary_group(runtime: MihomoRuntimeState):
-        if not runtime.groups:
-            return None
-        group_map = TrayController._mihomo_group_map(runtime)
-        preferred = []
-        active = TrayController._mihomo_active_group_name(runtime)
-        if active:
-            preferred.append(active)
-        preferred.extend(["PROXY", "DESKVANE-PROXY", "GLOBAL", "Auto", "Direct"])
-        for name in preferred:
-            group = group_map.get(name)
-            if group is not None:
-                return group
-        return runtime.groups[0]
-
-    @staticmethod
-    def _mihomo_visible_nodes(group, runtime: MihomoRuntimeState) -> list[str]:
-        group_names = {item.name for item in runtime.groups}
-        visible: list[str] = []
-        for candidate in group.candidates:
-            normalized = str(candidate).strip()
-            if not normalized:
-                continue
-            if normalized in group_names:
-                continue
-            if normalized.upper() in {"DIRECT", "REJECT"}:
-                continue
-            visible.append(normalized)
-        return visible
-
-    @staticmethod
-    def _mihomo_leaf_node_name(group, runtime: MihomoRuntimeState) -> str:
-        group_map = TrayController._mihomo_group_map(runtime)
-        current = str(group.current).strip()
-        seen: set[str] = set()
-        while current and current in group_map and current not in seen:
-            seen.add(current)
-            current = str(group_map[current].current).strip()
-        return current or str(group.current).strip()
-
-    @staticmethod
-    def _compact_node_labels(nodes: list[str]) -> dict[str, str]:
-        host_labels: dict[str, str] = {}
-        for node in nodes:
-            host_token = TrayController._node_host_token(node)
-            if not host_token:
-                host_labels = {}
-                break
-            host_labels[node] = host_token
-        if host_labels and len(set(host_labels.values())) == len(nodes):
-            return host_labels
-
-        if not nodes:
-            return {}
-
-        prefix = os.path.commonprefix(nodes)
-        reversed_nodes = [node[::-1] for node in nodes]
-        suffix = os.path.commonprefix(reversed_nodes)[::-1]
-        if len(prefix) + len(suffix) >= min(len(node) for node in nodes):
-            suffix = ""
-
-        labels: dict[str, str] = {}
-        used: set[str] = set()
-        for node in nodes:
-            core = node[len(prefix):] if prefix else node
-            if suffix and core.endswith(suffix):
-                core = core[:-len(suffix)]
-            compact = core.strip(" -_@.:/|") or node
-            if compact in used:
-                compact = TrayController._truncate_text(node, 40)
-            used.add(compact)
-            labels[node] = compact
-        return labels
-
-    @staticmethod
-    def _node_host_token(node: str) -> str:
-        if "@" not in node:
-            return ""
-        host = node.rsplit("@", 1)[-1].strip()
-        if not host:
-            return ""
-        for sep in ("/", ":", "."):
-            if sep in host:
-                host = host.split(sep, 1)[0]
-        return host.strip()
-
-    def _mihomo_delay_ms_for_node(self, node: str, runtime: MihomoRuntimeState) -> int | None:
-        cached = self._mihomo_manual_delay_results.get(node)
-        if cached is not None and cached > 0:
-            return cached
-        for group in runtime.groups:
-            delay = group.candidate_delays.get(node)
-            if delay is not None and delay > 0:
-                return delay
-        return None
-
-    def _build_mihomo_node_menu_label(
-        self,
-        node: str,
-        compact_labels: dict[str, str],
-        runtime: MihomoRuntimeState,
-    ) -> str:
-        label = compact_labels.get(node, node)
-        delay = self._mihomo_delay_ms_for_node(node, runtime)
-        if delay is None:
-            return label
-        return f"{label} · {delay}ms"
-
-    def _start_mihomo_node_delay_test(self) -> None:
-        if self._mihomo_delay_test_running:
-            return
-        snapshot = self._get_mihomo_snapshot(use_cache=False)
-        runtime = snapshot["runtime"]
-        if not snapshot["core_status"].api_ready:
-            return
-        group = self._mihomo_primary_group(runtime)
-        if group is None:
-            return
-        nodes = self._mihomo_visible_nodes(group, runtime)
-        if not nodes:
-            return
-        test_url = group.test_url.strip() or DEFAULT_DELAY_TEST_URL
-        self._mihomo_delay_test_running = True
-        self.rebuild_menu()
-
-        def worker() -> None:
-            results: dict[str, int] = {}
-            for node in nodes:
-                try:
-                    delay = self.app.mihomo_test_proxy_delay(node, test_url)
-                except Exception:
-                    delay = None
-                if delay is not None:
-                    results[node] = delay
-            self.app.dispatcher.call_soon(
-                self._finish_mihomo_node_delay_test,
-                results,
-                len(nodes),
-                test_url,
-            )
-
-        threading.Thread(target=worker, daemon=True).start()
-
-    def _finish_mihomo_node_delay_test(
-        self,
-        results: dict[str, int],
-        total: int,
-        test_url: str,
-    ) -> None:
-        self._mihomo_delay_test_running = False
-        self._mihomo_manual_delay_results.update(results)
-        self._mihomo_snapshot_cache = None
-        self._mihomo_snapshot_at = 0.0
-        self.rebuild_menu()
-        if getattr(self.app.config.general, "notifications_enabled", True):
-            ok = len(results)
-            body = f"{ok}/{total} 个节点完成测速"
-            if test_url:
-                host = urlparse(test_url).netloc or test_url
-                body = f"{body} · {host}"
-            title = "Mihomo 节点延迟测试完成" if ok else "Mihomo 节点延迟测试失败"
-            self.app.notifier.show(title, body)
-
-    def _saved_subscription_urls(self) -> list[str]:
-        current = str(getattr(self.app.config.mihomo, "subscription_url", "")).strip()
-        saved = getattr(self.app.config.mihomo, "saved_subscriptions", []) or []
-        urls: list[str] = []
-        seen: set[str] = set()
-        for raw in [current, *saved]:
-            normalized = str(raw).strip()
-            if not normalized or normalized in seen:
-                continue
-            seen.add(normalized)
-            urls.append(normalized)
-        return urls
-
-    @staticmethod
-    def _subscription_menu_label(url: str) -> str:
-        normalized = url.strip()
-        if not normalized:
-            return "未命名订阅"
-        try:
-            parsed = urlparse(normalized)
-        except Exception:
-            return TrayController._truncate_text(normalized, 36)
-        host = parsed.netloc or "本地订阅"
-        query = parse_qs(parsed.query)
-        service = (query.get("service") or [""])[0].strip()
-        sub_id = (query.get("id") or [""])[0].strip()
-        if service:
-            return f"{host} · {service}"
-        if sub_id:
-            return f"{host} · …{sub_id[-6:]}"
-        tail = parsed.path.rstrip("/").rsplit("/", 1)[-1].strip()
-        if tail and tail not in {"", "getsub.php"}:
-            return f"{host} · {TrayController._truncate_text(tail, 14)}"
-        return host
-
     def _translator_status_line(self) -> str:
         if not self.app.translator.enabled:
             return "状态: 未启用"
@@ -563,205 +238,6 @@ class TrayController:
 
     def _clipboard_history_enabled(self) -> bool:
         return bool(getattr(self.app.config.general, "clipboard_history_enabled", True))
-
-    def _build_tools_menu_items(self):
-        item = self.pystray.MenuItem
-        menu = self.pystray.Menu
-        return menu(
-            item("截图并钉住", self._dispatch("do_screenshot_and_pin"), default=True),
-            item("纯 OCR", self._dispatch("do_pure_ocr")),
-            item(
-                "剪贴板历史",
-                self._dispatch("show_clipboard_history"),
-                enabled=lambda _item: self._clipboard_history_enabled(),
-            ),
-            item("订阅转换…", self._dispatch("show_subconverter")),
-        )
-
-    def _build_mihomo_menu_items(self):
-        item = self.pystray.MenuItem
-        menu = self.pystray.Menu
-        snapshot = self._get_mihomo_snapshot(use_cache=False)
-        title = snapshot["title"]
-        backend = snapshot["backend"]
-        installed = snapshot["installed"]
-        running = snapshot["running"]
-
-        items = []
-        if not installed:
-            items.append(item(f"{title} 未安装", self._noop, enabled=False))
-            return tuple(items)
-        else:
-            items.append(
-                item(
-                    "停止" if running else "启动",
-                    self._dispatch("toggle_mihomo"),
-                )
-            )
-        items.append(item(lambda _: self._build_mihomo_status_line(), self._noop, enabled=False))
-
-        error_line = self._build_mihomo_error_line()
-        if error_line:
-            items.append(item(lambda _: self._build_mihomo_error_line(), self._noop, enabled=False))
-
-        if backend == "core":
-            mode_sub = menu(
-                item(
-                    "Rule",
-                    self._dispatch_call(self.app.mihomo_set_mode, "rule"),
-                    radio=True,
-                    checked=lambda _item: self._mihomo_current_mode() == "rule",
-                    enabled=lambda _item: self._mihomo_api_ready(),
-                ),
-                item(
-                    "Global",
-                    self._dispatch_call(self.app.mihomo_set_mode, "global"),
-                    radio=True,
-                    checked=lambda _item: self._mihomo_current_mode() == "global",
-                    enabled=lambda _item: self._mihomo_api_ready(),
-                ),
-                item(
-                    "Direct",
-                    self._dispatch_call(self.app.mihomo_set_mode, "direct"),
-                    radio=True,
-                    checked=lambda _item: self._mihomo_current_mode() == "direct",
-                    enabled=lambda _item: self._mihomo_api_ready(),
-                ),
-            )
-            advanced_sub = menu(
-                item("重载配置", self._dispatch("mihomo_reload_core_config")),
-                item(
-                    lambda _item: self._build_mihomo_open_label(),
-                    self._dispatch("open_mihomo_controller"),
-                    enabled=lambda _item: self._mihomo_api_ready(),
-                ),
-                item("打开配置", self._dispatch("open_mihomo_core_config")),
-                item("打开日志", self._dispatch("open_mihomo_logs")),
-            )
-            subscription_urls = self._saved_subscription_urls()
-            if subscription_urls:
-                subscription_switch_sub = menu(
-                    *[
-                        item(
-                            lambda _item, url=url: self._subscription_menu_label(url),
-                            self._dispatch_call(self.app.mihomo_switch_subscription, url),
-                            radio=True,
-                            checked=lambda _item, url=url: str(self.app.config.mihomo.subscription_url).strip() == url,
-                        )
-                        for url in subscription_urls
-                    ]
-                )
-            else:
-                subscription_switch_sub = menu(
-                    item("暂无已保存订阅", self._noop, enabled=False),
-                )
-            quick_group = self._mihomo_primary_group(snapshot["runtime"])
-            quick_group_name = quick_group.name if quick_group is not None else ""
-            quick_nodes = (
-                self._mihomo_visible_nodes(quick_group, snapshot["runtime"])
-                if quick_group is not None
-                else []
-            )
-            current_node = (
-                self._mihomo_leaf_node_name(quick_group, snapshot["runtime"])
-                if quick_group is not None
-                else ""
-            )
-            compact_node_labels = self._compact_node_labels(quick_nodes)
-            if quick_group is not None and quick_nodes:
-                node_switch_sub = menu(
-                    item(
-                        lambda _item, group_name=quick_group_name: f"当前组: {group_name}",
-                        self._noop,
-                        enabled=False,
-                    ),
-                    self.pystray.Menu.SEPARATOR,
-                    item(
-                        "测试节点延迟（进行中）" if self._mihomo_delay_test_running else "测试节点延迟",
-                        self._dispatch_call(self._start_mihomo_node_delay_test),
-                        enabled=lambda _item: self._mihomo_api_ready() and not self._mihomo_delay_test_running,
-                    ),
-                    self.pystray.Menu.SEPARATOR,
-                    *[
-                        item(
-                            self._build_mihomo_node_menu_label(
-                                node,
-                                compact_node_labels,
-                                snapshot["runtime"],
-                            ),
-                            self._dispatch_call(self.app.mihomo_switch_proxy, quick_group_name, node),
-                            radio=True,
-                            checked=lambda _item, node=node: current_node == node,
-                            enabled=lambda _item: self._mihomo_api_ready(),
-                        )
-                        for node in quick_nodes
-                    ],
-                )
-            else:
-                node_switch_sub = menu(
-                    item("当前模式下没有可切换节点", self._noop, enabled=False),
-                )
-
-            items.append(
-                item(
-                    "模式",
-                    mode_sub,
-                    enabled=lambda _item: self._mihomo_api_ready(),
-                )
-            )
-            items.append(
-                item(
-                    "TUN 模式",
-                    self._dispatch("mihomo_toggle_tun"),
-                    checked=lambda _item: self._mihomo_tun_enabled(),
-                    enabled=lambda _item: self._mihomo_api_ready(),
-                )
-            )
-            items.append(
-                item(
-                    "PAC 模式",
-                    self._dispatch("mihomo_toggle_pac"),
-                    checked=lambda _item: bool(self.app.config.mihomo.pac_enabled),
-                    enabled=lambda _item: self._mihomo_api_ready(),
-                )
-            )
-            items.append(
-                item(
-                    "复制 PAC 地址",
-                    self._dispatch("mihomo_copy_pac_url"),
-                    enabled=lambda _item: bool(self.app.config.mihomo.pac_enabled),
-                )
-            )
-            items.append(self.pystray.Menu.SEPARATOR)
-            items.append(item("打开面板…", self._dispatch("show_mihomo_window")))
-            items.append(
-                item(
-                    "节点快切",
-                    node_switch_sub,
-                    enabled=lambda _item: self._mihomo_api_ready(),
-                )
-            )
-            items.append(
-                item(
-                    "订阅",
-                    menu(
-                        item(
-                            "更新当前订阅",
-                            self._dispatch("mihomo_update_subscription"),
-                            enabled=lambda _item: self._mihomo_has_saved_subscription(),
-                        ),
-                        item(
-                            "快速切换",
-                            subscription_switch_sub,
-                            enabled=lambda _item: self._mihomo_has_saved_subscription(),
-                        ),
-                    ),
-                )
-            )
-            items.append(item("高级与诊断", advanced_sub))
-        elif running:
-            items.append(item("打开控制台", self._dispatch("show_mihomo_window")))
-        return tuple(items)
 
     # ---------------------------------------------------------------
     # Menu
@@ -812,47 +288,9 @@ class TrayController:
             is_git_proxy_enabled=shell_state.git_proxy_enabled,
             is_terminal_proxy_enabled=shell_state.terminal_proxy_enabled,
             terminal_proxy_supported=shell_state.terminal_proxy_supported,
-            mihomo=self._build_mihomo_menu_state(),
         )
 
-    def _build_mihomo_menu_state(self) -> MihomoMenuState:
-        feature_state = self.app.get_mihomo_state()
-        runtime = feature_state.runtime
-        core_status = feature_state.core_status
-        groups = tuple(
-            MihomoProxyGroupState(
-                name=group.name,
-                group_type=group.group_type,
-                current=str(group.current),
-                candidates=tuple(str(candidate) for candidate in group.candidates),
-                candidate_delays=dict(group.candidate_delays),
-                test_url=str(group.test_url),
-            )
-            for group in runtime.groups
-        )
-        return MihomoMenuState(
-            installed=feature_state.installed,
-            running=feature_state.running,
-            backend=feature_state.backend,
-            title=feature_state.title,
-            api_ready=bool(core_status.api_ready),
-            party_supported=feature_state.party_supported,
-            mode=str(runtime.mode),
-            tun_enabled=bool(runtime.tun_enabled),
-            mixed_port=runtime.mixed_port,
-            port=runtime.port,
-            has_external_ui=feature_state.has_external_ui,
-            last_error=str(getattr(core_status, "last_error", "") or ""),
-            config_error=str(getattr(core_status, "config_error", "") or ""),
-            pac_enabled=feature_state.pac_enabled,
-            subscription_url=feature_state.subscription_url,
-            saved_subscriptions=feature_state.saved_subscriptions,
-            groups=groups,
-            delay_test_running=self._mihomo_delay_test_running,
-            manual_delay_results=dict(self._mihomo_manual_delay_results),
-        )
-
-    def _render_tray_menu_model(self, model: TrayMenuModel):
+    def _render_tray_menu_model(self, model):
         return self.pystray.Menu(*(self._render_tray_menu_entry(entry) for entry in model.items))
 
     @staticmethod
@@ -887,8 +325,6 @@ class TrayController:
     def _resolve_menu_action(self, action: str | None, action_args: tuple[object, ...]):
         if action is None:
             return self._noop
-        if action == TrayAction.MIHOMO_START_NODE_DELAY_TEST:
-            return self._dispatch_call(self._start_mihomo_node_delay_test)
         if action_args:
             return self._dispatch_call(getattr(self.app, action), *action_args)
         return self._dispatch(action)
@@ -909,7 +345,7 @@ class TrayController:
         mode = getattr(self.app.config.general, "tray_display", "default")
         image = self.Image.new("RGBA", (64, 64), (0, 0, 0, 0))
         draw = self.ImageDraw.Draw(image)
-        
+
         if mode == "default":
             # Brand icon: rounded square with a forward vane mark.
             draw.rounded_rectangle((4, 4, 60, 60), radius=14, fill="#5b61f6")
@@ -926,7 +362,7 @@ class TrayController:
             ]
             draw.polygon(mark, fill="white")
             return image
-        
+
         display_value: int | None = None
         meter_pct = 0
         family_color = "#6366f1"
@@ -973,7 +409,7 @@ class TrayController:
                         meter_pct = 0
                     family_color = "#cba6f7"
                     accent = "#cba6f7"
-        
+
         # Visible dark background (not pure black, stands out on all tray themes)
         draw.rounded_rectangle((4, 4, 60, 60), radius=14, fill="#2d2d3f", outline="#4a4a5e", width=1)
         # Metric family chip in the top-left corner.
@@ -986,7 +422,7 @@ class TrayController:
         # Two-digit seven-segment display is more reliable than font rendering
         # under small tray icon scaling on GNOME.
         self._draw_value_display(draw, 10, 13, display_value, fill=value_color)
-        
+
         return image
 
     @staticmethod

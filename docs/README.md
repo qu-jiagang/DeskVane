@@ -5,6 +5,7 @@
 - 产品/架构文档
   - `architecture-design.md`
   - `cross-platform-refactor-plan.md`
+  - `tauri-migration-plan.md`
   - `platform-feature-matrix.md`
   - `platform-support-statement.md`
   - `release-process.md`

@@ -1,5 +1,7 @@
 # DeskVane 跨平台重构计划
 
+> 注：Mihomo 集成已从 DeskVane 中彻底移除。本文档中提及的 Mihomo 相关阶段和策略仅作为历史设计保留，不再执行。
+
 ## 目标
 
 将 DeskVane 从当前的 Linux-first 桌面工具，重构为可稳定支持 Linux、Windows、macOS 的桌面托盘应用，并为后续各平台打包发布建立统一的架构基础。

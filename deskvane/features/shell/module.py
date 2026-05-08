@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+
 from ...app_context import ModuleContext
 from ...core.contributions import SettingsGroupSpec, SettingsSectionSpec
 from ...feature_module import FeatureModule
@@ -13,7 +15,8 @@ class TrayFeatureModule(FeatureModule):
 
     def register(self, context: ModuleContext) -> None:
         self._context = context
-        context.tasks.register("tray", context.app.tray.start, context.app.tray.stop)
+        if os.environ.get("DESKVANE_DISABLE_TRAY") != "1":
+            context.tasks.register("tray", context.app.tray.start, context.app.tray.stop)
 
     def start(self) -> None:
         if self._context is None:
@@ -41,7 +44,8 @@ class HotkeyFeatureModule(FeatureModule):
 
     def register(self, context: ModuleContext) -> None:
         self._context = context
-        context.tasks.register("hotkeys", context.app.hotkeys.start, context.app.hotkeys.stop)
+        if os.environ.get("DESKVANE_DISABLE_HOTKEYS") != "1":
+            context.tasks.register("hotkeys", context.app.hotkeys.start, context.app.hotkeys.stop)
 
     def start(self) -> None:
         return

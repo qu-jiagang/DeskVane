@@ -34,7 +34,7 @@ class SubconverterFeatureModule(FeatureModule):
                 config_attr="subconverter",
                 summary="只需配置服务开关和端口。",
                 order=50,
-                groups=(SettingsGroupSpec("本地订阅服务", "为 Clash/Mihomo 提供本地转换服务。", ("enable_server", "port")),),
+                groups=(SettingsGroupSpec("本地订阅服务", "提供本地订阅转 Clash/Mihomo YAML 的转换服务。", ("enable_server", "port")),),
             ),
         )
 

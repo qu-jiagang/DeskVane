@@ -4,7 +4,6 @@ from types import SimpleNamespace
 from PIL import Image as PILImage
 from PIL import ImageDraw as PILImageDraw
 
-from deskvane.mihomo.api import MihomoProxyGroup, MihomoRuntimeState
 from deskvane.ui.tray import TrayController
 
 
@@ -46,12 +45,10 @@ def test_build_tray_menu_state_reads_git_proxy_flag_from_app() -> None:
         platform_services=SimpleNamespace(
             info=SimpleNamespace(
                 supports_terminal_proxy=False,
-                supports_mihomo_party=False,
             )
         ),
     )
     tray._clipboard_history_enabled = lambda: True
-    tray._build_mihomo_menu_state = lambda: SimpleNamespace()
 
     state = TrayController._build_tray_menu_state(tray)
 
@@ -62,11 +59,14 @@ def test_render_tray_menu_entry_wraps_checked_true_flag_as_callable() -> None:
     captured = {}
 
     class _FakePystray:
-        Menu = staticmethod(lambda *items: tuple(items))
+        class _Menu:
+            SEPARATOR = object()
+
+            def __call__(self, *items):
+                return tuple(items)
+
+        Menu = _Menu()
         MenuItem = staticmethod(lambda label, action, **kwargs: captured.update({"label": label, "action": action, **kwargs}) or captured)
-        class _Separator:
-            pass
-        Menu = SimpleNamespace(SEPARATOR=_Separator(), __call__=staticmethod(lambda *items: tuple(items)))
 
     tray = TrayController.__new__(TrayController)
     tray.pystray = _FakePystray
@@ -210,201 +210,3 @@ def test_build_label_for_default_mode_is_blank() -> None:
 
     assert label == ""
     assert guide == ""
-
-
-def test_mihomo_snapshot_uses_core_status_running_flag() -> None:
-    runtime = MihomoRuntimeState(
-        api_ready=True,
-        controller="http://127.0.0.1:9090",
-        mode="rule",
-        mixed_port=7890,
-        port=None,
-        socks_port=7891,
-        tun_enabled=True,
-        groups=[],
-    )
-    tray = TrayController.__new__(TrayController)
-    tray.app = SimpleNamespace(
-        get_mihomo_state=lambda: SimpleNamespace(
-            installed=True,
-            running=True,
-            backend="core",
-            title="Mihomo Core",
-            core_status=SimpleNamespace(controller="http://127.0.0.1:9090", api_ready=True, running=True),
-            runtime=runtime,
-            has_external_ui=False,
-        ),
-    )
-
-    snapshot = TrayController._get_mihomo_snapshot(tray, use_cache=False)
-
-    assert snapshot["running"] is True
-    assert snapshot["runtime"].tun_enabled is True
-
-
-def test_saved_subscription_urls_put_current_first_and_deduplicate() -> None:
-    tray = TrayController.__new__(TrayController)
-    tray.app = SimpleNamespace(
-        config=SimpleNamespace(
-            mihomo=SimpleNamespace(
-                subscription_url="https://current.example/sub",
-                saved_subscriptions=[
-                    "https://old.example/sub",
-                    "https://current.example/sub",
-                ],
-            )
-        )
-    )
-
-    assert TrayController._saved_subscription_urls(tray) == [
-        "https://current.example/sub",
-        "https://old.example/sub",
-    ]
-
-
-def test_subscription_menu_label_prefers_host_and_service() -> None:
-    label = TrayController._subscription_menu_label(
-        "https://jmssub.net/members/getsub.php?service=1206392&id=a2e3eab7-38e1-4394-b71e-ef012e0abcab"
-    )
-
-    assert label == "jmssub.net · 1206392"
-
-
-def test_mihomo_primary_group_prefers_proxy_in_rule_mode() -> None:
-    runtime = MihomoRuntimeState(
-        api_ready=True,
-        controller="http://127.0.0.1:9090",
-        mode="rule",
-        mixed_port=7890,
-        port=None,
-        socks_port=7891,
-        tun_enabled=True,
-        groups=[
-            MihomoProxyGroup(name="Auto", group_type="URLTest", current="Node-B", candidates=["Node-A", "Node-B"]),
-            MihomoProxyGroup(name="PROXY", group_type="Selector", current="Auto", candidates=["Auto", "Node-A", "Node-B"]),
-            MihomoProxyGroup(name="GLOBAL", group_type="Selector", current="Node-A", candidates=["Node-A", "Node-B"]),
-        ],
-    )
-
-    group = TrayController._mihomo_primary_group(runtime)
-
-    assert group is not None
-    assert group.name == "PROXY"
-
-
-def test_mihomo_visible_nodes_filter_nested_groups_and_builtins() -> None:
-    runtime = MihomoRuntimeState(
-        api_ready=True,
-        controller="http://127.0.0.1:9090",
-        mode="rule",
-        mixed_port=7890,
-        port=None,
-        socks_port=7891,
-        tun_enabled=True,
-        groups=[
-            MihomoProxyGroup(name="PROXY", group_type="Selector", current="Node-A", candidates=["Auto", "Direct", "Node-A", "Node-B", "DIRECT", "REJECT"]),
-            MihomoProxyGroup(name="Auto", group_type="URLTest", current="Node-B", candidates=["Node-A", "Node-B"]),
-            MihomoProxyGroup(name="Direct", group_type="Selector", current="DIRECT", candidates=["DIRECT"]),
-        ],
-    )
-    group = runtime.groups[0]
-
-    assert TrayController._mihomo_visible_nodes(group, runtime) == ["Node-A", "Node-B"]
-
-
-def test_mihomo_leaf_node_name_resolves_nested_group_current() -> None:
-    runtime = MihomoRuntimeState(
-        api_ready=True,
-        controller="http://127.0.0.1:9090",
-        mode="rule",
-        mixed_port=7890,
-        port=None,
-        socks_port=7891,
-        tun_enabled=True,
-        groups=[
-            MihomoProxyGroup(name="Auto", group_type="URLTest", current="Node-B", candidates=["Node-A", "Node-B"]),
-            MihomoProxyGroup(name="PROXY", group_type="Selector", current="Auto", candidates=["Auto", "Node-A", "Node-B"]),
-        ],
-    )
-
-    assert TrayController._mihomo_leaf_node_name(runtime.groups[1], runtime) == "Node-B"
-
-
-def test_compact_node_labels_prefers_host_token_when_unique() -> None:
-    labels = TrayController._compact_node_labels(
-        [
-            "JMS-1206392@c82s1.portablesubmarines.com:19652",
-            "JMS-1206392@c82s2.portablesubmarines.com:19652",
-            "JMS-1206392@c82s801.portablesubmarines.com:19652",
-        ]
-    )
-
-    assert labels == {
-        "JMS-1206392@c82s1.portablesubmarines.com:19652": "c82s1",
-        "JMS-1206392@c82s2.portablesubmarines.com:19652": "c82s2",
-        "JMS-1206392@c82s801.portablesubmarines.com:19652": "c82s801",
-    }
-
-
-def test_build_mihomo_node_menu_label_includes_delay() -> None:
-    runtime = MihomoRuntimeState(
-        api_ready=True,
-        controller="http://127.0.0.1:9090",
-        mode="rule",
-        mixed_port=7890,
-        port=None,
-        socks_port=7891,
-        tun_enabled=True,
-        groups=[
-            MihomoProxyGroup(
-                name="PROXY",
-                group_type="Selector",
-                current="Node-A",
-                candidates=["Node-A", "Node-B"],
-                candidate_delays={"Node-A": 123},
-            ),
-        ],
-    )
-    tray = TrayController.__new__(TrayController)
-    tray._mihomo_manual_delay_results = {}
-
-    label = TrayController._build_mihomo_node_menu_label(
-        tray,
-        "Node-A",
-        {"Node-A": "c82s1"},
-        runtime,
-    )
-
-    assert label == "c82s1 · 123ms"
-
-
-def test_build_mihomo_node_menu_label_ignores_zero_delay() -> None:
-    runtime = MihomoRuntimeState(
-        api_ready=True,
-        controller="http://127.0.0.1:9090",
-        mode="rule",
-        mixed_port=7890,
-        port=None,
-        socks_port=7891,
-        tun_enabled=True,
-        groups=[
-            MihomoProxyGroup(
-                name="PROXY",
-                group_type="Selector",
-                current="Node-A",
-                candidates=["Node-A"],
-                candidate_delays={"Node-A": 0},
-            ),
-        ],
-    )
-    tray = TrayController.__new__(TrayController)
-    tray._mihomo_manual_delay_results = {}
-
-    label = TrayController._build_mihomo_node_menu_label(
-        tray,
-        "Node-A",
-        {"Node-A": "c82s1"},
-        runtime,
-    )
-
-    assert label == "c82s1"

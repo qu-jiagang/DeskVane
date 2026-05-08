@@ -1,0 +1,498 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>DeskVane</title>
+    <link rel="stylesheet" href="/src/styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brand-mark">DV</div>
+          <div>
+            <h1>DeskVane</h1>
+            <span>控制台</span>
+          </div>
+        </div>
+        <nav class="nav">
+          <a href="#" data-page-target="overview" class="active">概览</a>
+          <a href="#" data-page-target="capture">截图</a>
+          <a href="#" data-page-target="translator">翻译</a>
+          <a href="#" data-page-target="clipboard">剪贴板</a>
+          <a href="#" data-page-target="proxy">代理</a>
+          <a href="#" data-page-target="subconverter">订阅转换</a>
+          <a href="#" data-page-target="settings">设置</a>
+        </nav>
+        <div class="source-stamp">Tauri 源码版 20260508</div>
+      </aside>
+
+      <section class="workspace">
+        <header class="topbar">
+          <div>
+            <h2>DeskVane 控制台</h2>
+            <p id="state-updated">--</p>
+          </div>
+          <div class="status" id="runtime-status">连接中</div>
+        </header>
+
+        <section class="status-strip page active" data-page="overview">
+          <div class="status-item">
+            <span>运行时</span>
+            <strong id="runtime-chip">--</strong>
+          </div>
+          <div class="status-item">
+            <span>托盘</span>
+            <strong id="tray-chip">--</strong>
+          </div>
+          <div class="status-item">
+            <span>GPU 显存</span>
+            <strong id="gpu-mem-chip">--</strong>
+          </div>
+          <div class="status-item">
+            <span>翻译</span>
+            <strong id="translator-chip">--</strong>
+          </div>
+        </section>
+
+        <section class="action-bar page" data-page="capture">
+          <button data-action="capture.screenshot_and_pin">截图并钉住</button>
+          <button data-action="capture.interactive_screenshot">交互截图</button>
+          <button data-action="capture.pure_ocr">纯 OCR</button>
+          <button data-action="capture.pin_clipboard">钉住剪贴板</button>
+          <span id="action-status">待命</span>
+        </section>
+
+        <section class="layout-grid">
+          <article class="panel monitor-panel page active" data-page="overview">
+            <div class="panel-title">
+              <h3>系统与托盘</h3>
+              <span id="tray-mode-label">--</span>
+            </div>
+            <div class="monitor-body">
+              <div class="tray-preview" id="tray-preview">--</div>
+              <dl class="metrics">
+                <div>
+                  <dt>CPU</dt>
+                  <dd id="cpu-metric">--</dd>
+                </div>
+                <div>
+                  <dt>GPU</dt>
+                  <dd id="gpu-metric">--</dd>
+                </div>
+                <div>
+                  <dt>代理</dt>
+                  <dd id="proxy-metric">--</dd>
+                </div>
+                <div>
+                  <dt>订阅转换</dt>
+                  <dd id="subconverter-metric">--</dd>
+                </div>
+              </dl>
+            </div>
+          </article>
+
+          <article class="panel capture-workbench page" data-page="capture">
+            <div class="panel-title">
+              <h3>截图工作台</h3>
+              <span id="capture-save-mode">--</span>
+            </div>
+            <div class="action-grid">
+              <button data-action="capture.screenshot_and_pin" class="action-tile">
+                <strong>截图并钉住</strong>
+                <span id="capture-hotkey-pin-view">--</span>
+              </button>
+              <button data-action="capture.interactive_screenshot" class="action-tile">
+                <strong>交互截图</strong>
+                <span id="capture-hotkey-interactive-view">--</span>
+              </button>
+              <button data-action="capture.pure_ocr" class="action-tile">
+                <strong>纯 OCR</strong>
+                <span id="capture-hotkey-ocr-view">--</span>
+              </button>
+              <button data-action="capture.pin_clipboard" class="action-tile">
+                <strong>钉剪贴板</strong>
+                <span id="capture-hotkey-clipboard-view">--</span>
+              </button>
+            </div>
+          </article>
+
+          <article class="panel capture-settings page" data-page="capture">
+            <div class="panel-title">
+              <h3>截图配置</h3>
+              <span>从设置页保存后生效</span>
+            </div>
+            <dl class="detail-list">
+              <div>
+                <dt>保存目录</dt>
+                <dd id="capture-save-dir-view">--</dd>
+              </div>
+              <div>
+                <dt>默认截图热键</dt>
+                <dd id="capture-hotkey-view">--</dd>
+              </div>
+              <div>
+                <dt>剪贴板</dt>
+                <dd id="capture-copy-view">--</dd>
+              </div>
+              <div>
+                <dt>磁盘保存</dt>
+                <dd id="capture-disk-view">--</dd>
+              </div>
+            </dl>
+          </article>
+
+          <article class="panel proxy-panel page" data-page="proxy">
+            <div class="panel-title">
+              <h3>代理</h3>
+              <span id="proxy-page-status">--</span>
+            </div>
+            <div class="panel-tools">
+              <button data-action="proxy.toggle_git" id="git-proxy-action">切换 Git 代理</button>
+              <button data-action="proxy.toggle_terminal" id="terminal-proxy-action">切换终端代理</button>
+            </div>
+            <dl class="detail-list">
+              <div>
+                <dt>代理地址</dt>
+                <dd id="proxy-address-view">--</dd>
+              </div>
+              <div>
+                <dt>Git 代理</dt>
+                <dd id="git-proxy-view">--</dd>
+              </div>
+              <div>
+                <dt>终端代理</dt>
+                <dd id="terminal-proxy-view">--</dd>
+              </div>
+            </dl>
+          </article>
+
+          <article class="panel proxy-events page" data-page="proxy">
+            <div class="panel-title">
+              <h3>代理事件</h3>
+              <span>最近 30 条</span>
+            </div>
+            <ol id="proxy-event-list" class="events compact-events"></ol>
+          </article>
+
+          <article class="panel subconverter-panel page" data-page="subconverter">
+            <div class="panel-title">
+              <h3>订阅转换</h3>
+              <span id="subconverter-page-status">--</span>
+            </div>
+            <div class="panel-tools">
+              <button data-action="subconverter.show">打开订阅转换</button>
+            </div>
+            <dl class="detail-list">
+              <div>
+                <dt>服务</dt>
+                <dd id="subconverter-enabled-view">--</dd>
+              </div>
+              <div>
+                <dt>端口</dt>
+                <dd id="subconverter-port-view">--</dd>
+              </div>
+              <div>
+                <dt>运行状态</dt>
+                <dd id="subconverter-running-view">--</dd>
+              </div>
+            </dl>
+          </article>
+
+          <article class="panel subconverter-endpoints page" data-page="subconverter">
+            <div class="panel-title">
+              <h3>服务入口</h3>
+              <span id="subconverter-url-view">--</span>
+            </div>
+            <div class="endpoint-grid">
+              <div>
+                <span>本地服务</span>
+                <strong id="subconverter-local-url">--</strong>
+              </div>
+              <div>
+                <span>状态</span>
+                <strong id="subconverter-health-view">--</strong>
+              </div>
+            </div>
+          </article>
+
+          <article class="panel settings-panel page" data-page="settings">
+            <div class="panel-title">
+              <h3>常用设置</h3>
+              <span id="config-save-status">可编辑</span>
+            </div>
+            <form id="config-form" class="config-form">
+              <fieldset>
+                <legend>通用</legend>
+                <label>
+                  <span>托盘显示</span>
+                  <select name="tray_display">
+                    <option value="default">默认图标</option>
+                    <option value="cpu_usage">CPU 使用率</option>
+                    <option value="cpu_temp">CPU 温度</option>
+                    <option value="gpu_usage">GPU 使用率</option>
+                    <option value="gpu_temp">GPU 温度</option>
+                    <option value="gpu_mem">GPU 显存占用</option>
+                  </select>
+                </label>
+                <label>
+                  <span>剪贴板热键</span>
+                  <input name="hotkey_clipboard_history" />
+                </label>
+                <label class="checkbox">
+                  <input type="checkbox" name="notifications_enabled" />
+                  <span>启用通知</span>
+                </label>
+                <label class="checkbox">
+                  <input type="checkbox" name="clipboard_history_enabled" />
+                  <span>剪贴板历史</span>
+                </label>
+                <label class="checkbox">
+                  <input type="checkbox" name="autostart_enabled" />
+                  <span>开机自启动</span>
+                </label>
+              </fieldset>
+
+              <fieldset>
+                <legend>截图</legend>
+                <label>
+                  <span>保存目录</span>
+                  <input name="screenshot_save_dir" />
+                </label>
+                <label>
+                  <span>截图热键</span>
+                  <input name="screenshot_hotkey" />
+                </label>
+                <label>
+                  <span>钉图热键</span>
+                  <input name="screenshot_hotkey_pin" />
+                </label>
+                <label>
+                  <span>OCR 热键</span>
+                  <input name="screenshot_hotkey_pure_ocr" />
+                </label>
+                <label>
+                  <span>交互截图</span>
+                  <input name="screenshot_hotkey_interactive" />
+                </label>
+                <label>
+                  <span>钉剪贴板</span>
+                  <input name="screenshot_hotkey_pin_clipboard" />
+                </label>
+                <label class="checkbox">
+                  <input type="checkbox" name="screenshot_copy_to_clipboard" />
+                  <span>复制到剪贴板</span>
+                </label>
+                <label class="checkbox">
+                  <input type="checkbox" name="screenshot_save_to_disk" />
+                  <span>保存到磁盘</span>
+                </label>
+                <label class="checkbox">
+                  <input type="checkbox" name="screenshot_notifications_enabled" />
+                  <span>截图通知</span>
+                </label>
+              </fieldset>
+
+              <fieldset>
+                <legend>代理</legend>
+                <label>
+                  <span>代理地址</span>
+                  <input name="proxy_address" />
+                </label>
+              </fieldset>
+
+              <fieldset>
+                <legend>翻译</legend>
+                <label class="checkbox">
+                  <input type="checkbox" name="translator_enabled" />
+                  <span>启用翻译</span>
+                </label>
+                <label class="checkbox">
+                  <input type="checkbox" name="translator_clipboard_enabled" />
+                  <span>监控剪贴板</span>
+                </label>
+                <label class="checkbox">
+                  <input type="checkbox" name="translator_popup_enabled" />
+                  <span>显示弹窗</span>
+                </label>
+                <label class="checkbox">
+                  <input type="checkbox" name="translator_auto_copy" />
+                  <span>自动复制译文</span>
+                </label>
+                <label>
+                  <span>Ollama 地址</span>
+                  <input name="ollama_host" />
+                </label>
+                <label>
+                  <span>模型</span>
+                  <input name="translator_model" />
+                </label>
+                <label>
+                  <span>源语言</span>
+                  <input name="source_language" />
+                </label>
+                <label>
+                  <span>目标语言</span>
+                  <input name="target_language" />
+                </label>
+                <label>
+                  <span>暂停热键</span>
+                  <input name="hotkey_toggle_pause" />
+                </label>
+                <label>
+                  <span>轮询 ms</span>
+                  <input type="number" name="poll_interval_ms" min="50" max="5000" />
+                </label>
+                <label>
+                  <span>防抖 ms</span>
+                  <input type="number" name="debounce_ms" min="0" max="5000" />
+                </label>
+                <label>
+                  <span>最少字符</span>
+                  <input type="number" name="min_chars" min="1" />
+                </label>
+                <label>
+                  <span>最多字符</span>
+                  <input type="number" name="max_chars" min="1" />
+                </label>
+                <label>
+                  <span>超时秒</span>
+                  <input type="number" name="request_timeout_s" min="1" max="300" />
+                </label>
+                <label>
+                  <span>输出 token</span>
+                  <input type="number" name="max_output_tokens" min="16" />
+                </label>
+                <label>
+                  <span>弹窗宽度</span>
+                  <input type="number" name="popup_width_px" min="100" />
+                </label>
+                <label>
+                  <span>keep alive</span>
+                  <input name="keep_alive" />
+                </label>
+                <label class="wide-field">
+                  <span>附加提示词</span>
+                  <textarea name="prompt_extra" rows="3"></textarea>
+                </label>
+              </fieldset>
+
+              <fieldset>
+                <legend>订阅转换</legend>
+                <label class="checkbox">
+                  <input type="checkbox" name="subconverter_enable_server" />
+                  <span>启用服务</span>
+                </label>
+                <label>
+                  <span>端口</span>
+                  <input type="number" name="subconverter_port" min="1024" max="65535" />
+                </label>
+              </fieldset>
+              <div class="form-actions">
+                <button type="submit" class="primary">保存配置</button>
+              </div>
+            </form>
+          </article>
+
+          <article class="panel translator-panel page" data-page="translator">
+            <div class="panel-title">
+              <h3>翻译</h3>
+              <span id="translator-status">待输入</span>
+            </div>
+            <div class="translation-status-grid">
+              <div>
+                <span>监控</span>
+                <strong id="translator-monitor-view">--</strong>
+              </div>
+              <div>
+                <span>后端</span>
+                <strong id="translator-backend-view">--</strong>
+              </div>
+              <div>
+                <span>模型</span>
+                <strong id="translator-model-view">--</strong>
+              </div>
+            </div>
+            <div class="panel-tools">
+              <button
+                type="button"
+                data-action="translator.toggle_pause"
+                id="translator-pause-action"
+                class="monitor-toggle"
+                aria-pressed="false"
+              >
+                <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                <span class="toggle-label">监控开关</span>
+              </button>
+              <button type="button" data-action="translator.retry_last">重试上次</button>
+              <button type="button" data-action="translator.copy_last">复制最近译文</button>
+            </div>
+            <form id="translator-form" class="translator-form">
+              <textarea name="source_text" rows="5" placeholder="输入要翻译的文本"></textarea>
+              <div class="form-actions">
+                <button type="submit" class="primary">翻译</button>
+              </div>
+            </form>
+            <pre id="translator-result"></pre>
+          </article>
+
+          <article class="panel translator-settings-preview page" data-page="translator">
+            <div class="panel-title">
+              <h3>翻译参数</h3>
+              <span>设置页可编辑</span>
+            </div>
+            <dl class="detail-list">
+              <div>
+                <dt>Ollama</dt>
+                <dd id="translator-host-view">--</dd>
+              </div>
+              <div>
+                <dt>语言</dt>
+                <dd id="translator-language-view">--</dd>
+              </div>
+              <div>
+                <dt>剪贴板监控</dt>
+                <dd id="translator-clipboard-view">--</dd>
+              </div>
+              <div>
+                <dt>自动复制</dt>
+                <dd id="translator-auto-copy-view">--</dd>
+              </div>
+            </dl>
+          </article>
+
+          <article class="panel list-panel page" data-page="clipboard">
+            <div class="panel-title">
+              <h3>剪贴板历史</h3>
+              <span id="clipboard-count">0</span>
+            </div>
+            <div class="panel-tools">
+              <input id="clipboard-search" class="toolbar-input" placeholder="搜索剪贴板内容" />
+              <button data-action="clipboard.show_history">打开剪贴板历史窗口</button>
+            </div>
+            <ol id="clipboard-list" class="clipboard-list"></ol>
+          </article>
+
+          <article class="panel clipboard-detail page" data-page="clipboard">
+            <div class="panel-title">
+              <h3>选中预览</h3>
+              <span id="clipboard-selected-index">--</span>
+            </div>
+            <pre id="clipboard-selected-preview"></pre>
+          </article>
+
+          <article class="panel json-panel page" data-page="settings">
+            <div class="panel-title">
+              <h3>完整配置 JSON</h3>
+              <button type="button" id="config-json-save">保存全部</button>
+            </div>
+            <textarea id="config-view" spellcheck="false">{}</textarea>
+          </article>
+
+        </section>
+      </section>
+    </main>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

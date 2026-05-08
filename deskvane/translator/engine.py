@@ -397,15 +397,26 @@ class TranslatorEngine:
         )
 
     def toggle_pause(self) -> None:
+        if self.paused:
+            self.resume()
+            return
+        self.pause()
+
+    def pause(self) -> None:
+        if not self.running:
+            return
+        self.paused = True
+        self.popup.hide()
+        self._set_status("paused", "已暂停")
+
+    def resume(self) -> None:
         if not self.enabled:
             self._notify_once("翻译功能未启用", "如需启用，请打开设置 > 翻译，并开启翻译功能。")
             self._set_status("disabled", "未启用")
             return
-        self.paused = not self.paused
-        if self.paused:
-            self.popup.hide()
-            self._set_status("paused", "已暂停")
-            return
+        if not self.running:
+            self.start()
+        self.paused = False
         self._set_status("ready", "已恢复")
 
     def reload(self) -> None:

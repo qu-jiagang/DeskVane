@@ -5,7 +5,6 @@ from types import SimpleNamespace
 from deskvane.app_kernel import AppKernel
 from deskvane.features.capture.module import CaptureFeatureModule
 from deskvane.features.clipboard_history.module import ClipboardHistoryFeatureModule
-from deskvane.features.mihomo.module import MihomoFeatureModule
 from deskvane.features.proxy.module import ProxyFeatureModule
 from deskvane.features.shell.module import HotkeyFeatureModule, TrayFeatureModule
 from deskvane.features.subconverter.module import SubconverterFeatureModule
@@ -18,13 +17,18 @@ class _FakeApp:
         self.started = 0
         self.stopped = 0
         self.mainloop_entered = 0
-        self.tray = SimpleNamespace(start=lambda: None, stop=lambda: None, supports_menu=True)
+        self.tray_rebuilds = 0
+        self.tray = SimpleNamespace(
+            start=lambda: None,
+            stop=lambda: None,
+            supports_menu=True,
+            rebuild_menu=lambda: setattr(self, "tray_rebuilds", self.tray_rebuilds + 1),
+        )
         self.hotkeys = SimpleNamespace(start=lambda: None, stop=lambda: None)
-        self.translator = SimpleNamespace(start=lambda: None, stop=lambda: None)
+        self.translator = SimpleNamespace(start=lambda: None, stop=lambda: None, pause=lambda: None, resume=lambda: None)
         self.subconverter_server = None
         self.platform_services = SimpleNamespace(proxy_session=SimpleNamespace(setup=lambda: None))
-        self.mihomo_manager = SimpleNamespace(start=lambda: True, stop_all=lambda: None)
-        self.config = SimpleNamespace(mihomo=SimpleNamespace(autostart=False))
+        self.config = SimpleNamespace()
         self.root = SimpleNamespace(after=lambda delay, cb: None)
         self.notifier = SimpleNamespace(show=lambda title, body: None)
         self._refresh_proxy_display = lambda: None
@@ -68,6 +72,7 @@ def test_app_kernel_registers_context_and_runs_modules(monkeypatch) -> None:
     assert module.context is kernel.context
     assert kernel.context.platform is fake_platform
     assert kernel.context.app is kernel.app
+    assert kernel.app.tray_rebuilds == 1
 
     kernel.run()
 
@@ -78,15 +83,14 @@ def test_app_kernel_registers_context_and_runs_modules(monkeypatch) -> None:
 
 def test_runtime_modules_register_long_lived_tasks_and_start_hooks() -> None:
     events: list[str] = []
-    task_manager = SimpleNamespace(register=lambda name, start, stop: events.append(f"task:{name}"))
+    task_manager = SimpleNamespace(register=lambda name, start, stop, pause=None, resume=None: events.append(f"task:{name}"))
     app = SimpleNamespace(
         tray=SimpleNamespace(start=lambda: None, stop=lambda: None, supports_menu=True, refresh=lambda: events.append("tray.refresh"), rebuild_menu=lambda: events.append("tray.rebuild")),
         hotkeys=SimpleNamespace(start=lambda: None, stop=lambda: None),
-        translator=SimpleNamespace(start=lambda: None, stop=lambda: None),
+        translator=SimpleNamespace(start=lambda: None, stop=lambda: None, pause=lambda: None, resume=lambda: None),
         subconverter_server=SimpleNamespace(start=lambda: None, stop=lambda: None),
         platform_services=SimpleNamespace(proxy_session=SimpleNamespace(setup=lambda: events.append("proxy.setup"))),
-        mihomo_manager=SimpleNamespace(start=lambda: True, stop_all=lambda: events.append("mihomo.stop")),
-        config=SimpleNamespace(mihomo=SimpleNamespace(autostart=True)),
+        config=SimpleNamespace(),
         root=SimpleNamespace(after=lambda delay, cb: events.append(f"after:{delay}")),
         notifier=SimpleNamespace(show=lambda title, body: events.append(f"notify:{title}")),
         _refresh_proxy_display=lambda: events.append("proxy.refresh"),
@@ -100,7 +104,6 @@ def test_runtime_modules_register_long_lived_tasks_and_start_hooks() -> None:
         TranslatorFeatureModule(),
         SubconverterFeatureModule(),
         ProxyFeatureModule(),
-        MihomoFeatureModule(),
     ]
 
     for module in modules:
@@ -113,14 +116,6 @@ def test_runtime_modules_register_long_lived_tasks_and_start_hooks() -> None:
 
     assert "proxy.setup" in events
     assert "proxy.refresh" in events
-    assert "tray.refresh" in events
-    assert "tray.rebuild" in events
-    assert "after:1200" in events
-
-    for module in reversed(modules):
-        module.stop()
-
-    assert "mihomo.stop" in events
 
 
 def test_app_kernel_uses_feature_modules_by_default(monkeypatch) -> None:
@@ -135,5 +130,4 @@ def test_app_kernel_uses_feature_modules_by_default(monkeypatch) -> None:
         TranslatorFeatureModule,
         SubconverterFeatureModule,
         ProxyFeatureModule,
-        MihomoFeatureModule,
     ]
